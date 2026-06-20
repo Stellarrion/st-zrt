@@ -1,0 +1,10 @@
+# Normalize line endings; sources are LF.
+* text=auto eol=lf
+*.rs   text eol=lf
+*.toml text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+*.yml  text eol=lf
+
+# Binary model fixtures — never normalize.
+*.onnx binary

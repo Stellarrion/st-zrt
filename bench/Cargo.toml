@@ -1,0 +1,46 @@
+# Standalone comparison harness (NOT a member of the st-zrt workspace).
+# Uses the incumbent `ort` for variants A/B. Variant C (st-zrt) lives in a
+# separate crate because `ort-sys` and `st-zrt-sys` both `links = "onnxruntime"`
+# and cannot coexist in one Cargo graph. A/B and C are compared across runs.
+[package]
+name = "st-zrt-bench"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+# Standalone (own workspace root): keeps this crate's onnxruntime link (via ort-sys)
+# out of the st-zrt workspace graph.
+[workspace]
+
+[dependencies]
+ort = "2.0.0-rc.10"
+ndarray = "0.16"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "inference"
+harness = false
+
+[[bench]]
+name = "copy"
+harness = false
+
+[[bench]]
+name = "relay_ort"
+harness = false
+
+[[bench]]
+name = "hf_resnet"
+harness = false
+
+[profile.release]
+# Benchmark harnesses are intentionally tuned for stable local comparison numbers.
+debug = true
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

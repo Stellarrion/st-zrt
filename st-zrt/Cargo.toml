@@ -1,0 +1,93 @@
+[package]
+name = "st-zrt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = true
+description = "Stellarrion st-zrt: ultra-fast, zero-overhead Rust runtime over onnxruntime."
+documentation = "https://docs.rs/st-zrt"
+readme = "README.md"
+keywords = ["onnx", "onnxruntime", "inference", "runtime", "ffi"]
+categories = ["api-bindings", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+st-zrt-sys = { path = "../st-zrt-sys", version = "1.26.0" }
+futures-util = { version = "0.3", default-features = false }
+half = { version = "2", optional = true }
+serde = { version = "1", optional = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[features]
+default = []
+# Enable `half::f16` / `half::bf16` as tensor element types.
+half = ["dep:half"]
+# (De)serialize [`SessionOptions`] + the EP-option config types. Orthogonal to `ep`
+# (scalar session config is serializable without it); enabling both covers EP configs too.
+serde = ["dep:serde"]
+# Execution-provider configuration/discovery. This exposes provider option builders and EP-device
+# APIs, but keeps the CPU ONNX Runtime binary unless another feature, such as `cuda`, changes it.
+ep = ["st-zrt-sys/ep"]
+custom-ops = ["st-zrt-sys/custom-ops"]
+model-editor = ["st-zrt-sys/model-editor"]
+training = ["st-zrt-sys/training"]
+# Strict CUDA runtime build: GPU libonnxruntime + CUDA 12 runtime libs (auto-downloaded,
+# SHA-pinned), linked + rpath'd by build.rs. Implies `ep`.
+cuda = ["st-zrt-sys/cuda", "ep"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[[example]]
+name = "custom_op"
+required-features = ["custom-ops"]
+
+[[example]]
+name = "ep_config"
+required-features = ["ep"]
+
+[[example]]
+name = "cuda_inference"
+required-features = ["cuda"]
+
+[[test]]
+name = "custom_op_run"
+required-features = ["custom-ops"]
+path = "tests/custom_op_run.rs"
+
+[[test]]
+name = "cuda_ep"
+required-features = ["ep"]
+path = "tests/cuda_ep.rs"
+
+[[test]]
+name = "model_editor_run"
+required-features = ["model-editor"]
+path = "tests/model_editor_run.rs"
+
+[[test]]
+name = "model_editor_load"
+required-features = ["model-editor"]
+path = "tests/model_editor_load.rs"
+
+[[test]]
+name = "model_editor_serialize"
+required-features = ["model-editor"]
+path = "tests/model_editor_serialize.rs"
+
+[[test]]
+name = "model_editor_initializer"
+required-features = ["model-editor"]
+path = "tests/model_editor_initializer.rs"
+
+[[test]]
+name = "model_editor_compile"
+required-features = ["model-editor"]
+path = "tests/model_editor_compile.rs"

@@ -1,0 +1,41 @@
+# cargo-deny configuration - Stellarrion standard
+# Run: cargo deny check advisories sources licenses
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+# Add temporary advisory exceptions here:
+# ignore = ["RUSTSEC-2024-XXXX"]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+version = 2
+multiple-versions = "warn"
+wildcards = "allow"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+[sources]
+version = 2
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []

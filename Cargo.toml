@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = ["st-zrt-sys", "st-zrt", "codegen"]
+# NOTE: `bench/` is a standalone crate (uses incumbent `ort` for A/B). It is NOT a
+# workspace member - ort-sys and st-zrt-sys both link `onnxruntime` and cannot
+# share a Cargo graph. Variant C benchmarks against st-zrt in a separate crate.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+authors = ["Stellarrion"]
+repository = "https://github.com/Stellarrion/st-zrt"
+publish = false
+
+[workspace.lints.rust]
+missing_docs = "allow"
+
+[workspace.lints.clippy]
+wildcard_dependencies = "deny"
+cast_lossless = "allow"
+type_complexity = "allow"
+
+[profile.release]
+# Release profile follows the Stellarrion Rust template. Crates.io publishes source, so downstream
+# users still compile `st-zrt` with their own profile settings.
+codegen-units = 1
+overflow-checks = true
+lto = true
+opt-level = 3
+panic = "abort"
+strip = "symbols"
+
+[profile.ci]
+inherits = "release"
+debug = false
+debug-assertions = false
+incremental = false
+opt-level = 1
+lto = false
+strip = "none"
+
+[profile.dev]
+opt-level = 0
+overflow-checks = true
+
+[profile.bench]
+inherits = "release"
+debug = false
+debug-assertions = false
+incremental = false
+lto = true
+codegen-units = 1

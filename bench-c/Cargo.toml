@@ -1,0 +1,58 @@
+# Variant C comparison harness (standalone — NOT a workspace member).
+# Depends on st-zrt ONLY (no `ort`), so it links onnxruntime via st-zrt-sys without
+# the `links="onnxruntime"` conflict that keeps it out of the `bench` crate.
+# Methodology mirrors bench/benches/inference.rs exactly so A/B/C numbers compare.
+[package]
+name = "st-zrt-bench-c"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+# Standalone (own workspace root): avoids auto-join with the parent workspace, and
+# keeps this crate's onnxruntime link (via st-zrt-sys) out of the bench crate's graph.
+[workspace]
+
+[dependencies]
+st-zrt = { path = "../st-zrt" }
+
+[features]
+default = []
+ep = ["st-zrt/ep"]
+cuda = ["ep", "st-zrt/cuda"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "inference"
+harness = false
+
+[[bench]]
+name = "large"
+harness = false
+
+[[bench]]
+name = "crash_repro"
+harness = false
+
+[[bench]]
+name = "concurrency"
+harness = false
+
+[[bench]]
+name = "alloc_options"
+harness = false
+
+[[bench]]
+name = "hf_resnet"
+harness = false
+
+[profile.release]
+# Benchmark harnesses are intentionally tuned for stable local comparison numbers.
+debug = true
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

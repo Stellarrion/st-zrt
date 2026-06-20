@@ -1,0 +1,17 @@
+# Cargo build artifacts (any crate's target dir)
+/target/
+target/
+
+# Local/generated benchmark models.
+bench/models/
+
+# Editor / OS cruft
+*~
+.DS_Store
+*.swp
+
+# Local generated metadata / private automation
+_types.toml
+_typos.toml
+CHANGELOG.md
+bench/RESULTS.md

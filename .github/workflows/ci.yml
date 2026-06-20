@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["st-zrt-v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: Stellarrion/.github/.github/workflows/ci-rust.yml@main
+    with:
+      toolchain: stable
+      features: ""
+    secrets: inherit
