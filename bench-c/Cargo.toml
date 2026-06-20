@@ -48,6 +48,10 @@ harness = false
 name = "hf_resnet"
 harness = false
 
+[[bench]]
+name = "runtime_shapes"
+harness = false
+
 [profile.release]
 # Benchmark harnesses are intentionally tuned for stable local comparison numbers.
 debug = true

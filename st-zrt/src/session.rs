@@ -132,7 +132,7 @@ pub struct PreparedIoBinding<'s, 'v> {
 ///
 /// Each lane owns stable input and output buffers plus one IoBinding. Mutate inputs,
 /// call [`Self::run`], then read outputs. No per-run allocation, copy, or name binding is
-/// performed by ZRT. Use [`crate::ZrtRuntime`] when you need an owned fixed lane set.
+/// performed by ZRT. Use [`crate::Runtime`] when you need an owned static lane set.
 pub struct TensorIoLane<'s, T: TensorElement> {
     session: &'s Session,
     // Drop before the tensor buffers whose value handles it references.
@@ -1022,7 +1022,7 @@ impl Session {
     /// Build a fixed set of independent borrowed-session lanes.
     ///
     /// This returns plain borrowed-session lanes and intentionally does not schedule or lock.
-    /// For an owned fixed lane set, use [`crate::ZrtRuntime`].
+    /// For an owned static lane set, use [`crate::Runtime`].
     pub fn prepare_tensor_io_lanes<T>(
         &self, mem: &MemoryInfo, input_shapes: &[&[i64]], output_shapes: &[&[i64]], lanes: usize,
     ) -> Result<Vec<TensorIoLane<'_, T>>>
@@ -1278,7 +1278,7 @@ impl PreparedRun<'_, '_> {
 
     /// Run this prepared call `runs` times before serving.
     ///
-    /// This primes ORT's memory-pattern/cache behavior for fixed-shape workloads without
+    /// This primes ORT's memory-pattern/cache behavior for static-shape workloads without
     /// changing the measured serving path.
     pub fn prime(&mut self, runs: usize) -> Result<()> {
         for _ in 0..runs {

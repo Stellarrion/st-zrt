@@ -11,8 +11,8 @@ use std::sync::Arc;
 use st_zrt::AllocatedTensor;
 use st_zrt::{
     CudaArenaExtendStrategy, CudaCudnnConvAlgoSearch, CudaProviderOptions, Environment,
-    GraphOptimizationLevel, IoBinding, MemoryInfo, OutputValue, OwnedValue, PreparedRun, Session,
-    SessionOptions, Tensor, ZrtRuntime,
+    GraphOptimizationLevel, IoBinding, MemoryInfo, OutputValue, OwnedValue, PreparedRun, Runtime,
+    Session, SessionOptions, Tensor,
 };
 
 fn mnist_path() -> Option<std::path::PathBuf> {
@@ -223,7 +223,7 @@ fn cuda_allocated_output_tensor_binds_and_reports_cuda_memory() {
 }
 
 #[test]
-fn cuda_zrt_runtime_shared_session_matches_cpu() {
+fn cuda_runtime_shared_session_matches_cpu() {
     let Some(path) = mnist_path() else { return };
     let env = Environment::new().expect("env");
     let mem = MemoryInfo::cpu().expect("cpu mem");
@@ -237,7 +237,7 @@ fn cuda_zrt_runtime_shared_session_matches_cpu() {
         return;
     };
     let mut runtime =
-        ZrtRuntime::<f32>::shared_session(Arc::new(cuda), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 1)
+        Runtime::<f32>::shared_session(Arc::new(cuda), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 1)
             .expect("cuda runtime");
     let got = runtime
         .run_on(0, |lane| {

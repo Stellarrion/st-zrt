@@ -6,11 +6,11 @@
 //! Tensor::from_buffer (zero-copy input) → run → OwnedValue::as_slice (zero-copy output).
 
 use st_zrt::{
-    sys, Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, Environment,
-    GraphOptimizationLevel, IoBinding, LaneBufferPolicy, LoggingLevel, MemType, MemoryInfo,
-    ModelMetadata, OutputValue, OwnedInitializer, OwnedValue, PrepackedWeightsContainer,
-    RunOptions, Session, SessionOptions, Tensor, TensorBuffer, ZrtLaneSet, ZrtRuntime,
-    ZrtRuntimeMode,
+    sys, Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, DynamicIoOptions,
+    DynamicIoRuntime, Environment, GraphOptimizationLevel, IoBinding, LaneBufferPolicy,
+    LoggingLevel, MemType, MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
+    PrepackedWeightsContainer, RunOptions, Runtime, RuntimeMode, Session, SessionOptions,
+    StaticIoLane, StaticIoRuntime, Tensor, TensorBuffer,
 };
 use std::sync::Arc;
 
@@ -627,7 +627,7 @@ fn tensor_io_lanes_run_independent_bindings() {
 }
 
 #[test]
-fn zrt_runtime_shared_session_runs_exclusive_lanes() {
+fn runtime_shared_session_runs_exclusive_lanes() {
     let env = Environment::new().expect("env");
     let (mem, sess) = match mnist_session(&env) {
         Some(v) => v,
@@ -638,10 +638,10 @@ fn zrt_runtime_shared_session_runs_exclusive_lanes() {
     };
 
     let mut runtime =
-        ZrtRuntime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
+        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
             .expect("runtime");
     assert_eq!(runtime.len(), 2);
-    assert_eq!(runtime.session_mode(), ZrtRuntimeMode::SharedSession);
+    assert_eq!(runtime.session_mode(), RuntimeMode::SharedSession);
 
     let output_len = runtime
         .run_on(0, |lane| {
@@ -665,7 +665,7 @@ fn zrt_runtime_shared_session_runs_exclusive_lanes() {
 }
 
 #[test]
-fn zrt_lane_set_runs_without_checkout() {
+fn runtime_runs_without_checkout() {
     let env = Environment::new().expect("env");
     let (mem, sess) = match mnist_session(&env) {
         Some(v) => v,
@@ -676,10 +676,10 @@ fn zrt_lane_set_runs_without_checkout() {
     };
 
     let mut lanes =
-        ZrtLaneSet::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
+        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
             .expect("lane set");
     assert_eq!(lanes.len(), 2);
-    assert_eq!(lanes.session_mode(), ZrtRuntimeMode::SharedSession);
+    assert_eq!(lanes.session_mode(), RuntimeMode::SharedSession);
     assert!(lanes.lane(2).is_err());
     assert!(lanes.lane_mut(2).is_err());
 
@@ -690,7 +690,7 @@ fn zrt_lane_set_runs_without_checkout() {
 }
 
 #[test]
-fn zrt_runtime_converts_into_lane_set() {
+fn runtime_converts_into_lane_set() {
     let env = Environment::new().expect("env");
     let (mem, sess) = match mnist_session(&env) {
         Some(v) => v,
@@ -701,7 +701,7 @@ fn zrt_runtime_converts_into_lane_set() {
     };
 
     let runtime =
-        ZrtRuntime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 1)
+        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 1)
             .expect("runtime");
     let mut lanes = runtime.into_lane_set();
     assert_eq!(lanes.len(), 1);
@@ -712,7 +712,7 @@ fn zrt_runtime_converts_into_lane_set() {
 }
 
 #[test]
-fn zrt_runtime_replicated_sessions_run_independent_lanes() {
+fn runtime_replicated_sessions_run_independent_lanes() {
     let path = mnist_path();
     if !path.exists() {
         eprintln!("skipping — mnist.onnx absent");
@@ -721,7 +721,7 @@ fn zrt_runtime_replicated_sessions_run_independent_lanes() {
 
     let env = Environment::new().expect("env");
     let mem = MemoryInfo::cpu().expect("cpu mem");
-    let mut runtime = ZrtRuntime::<f32>::replicated_sessions(
+    let mut runtime = Runtime::<f32>::replicated_sessions(
         &env,
         path.to_str().unwrap(),
         SessionOptions::new().with_opt_level(GraphOptimizationLevel::All),
@@ -732,7 +732,7 @@ fn zrt_runtime_replicated_sessions_run_independent_lanes() {
     )
     .expect("runtime");
     assert_eq!(runtime.len(), 2);
-    assert_eq!(runtime.session_mode(), ZrtRuntimeMode::ReplicatedSessions);
+    assert_eq!(runtime.session_mode(), RuntimeMode::ReplicatedSessions);
     assert!(runtime.lane(2).is_err());
     assert!(runtime.lane_mut(2).is_err());
 
@@ -747,7 +747,7 @@ fn zrt_runtime_replicated_sessions_run_independent_lanes() {
 }
 
 #[test]
-fn zrt_runtime_session_factory_supports_owned_initializers() {
+fn runtime_session_factory_supports_owned_initializers() {
     let path = relay_path("256k");
     if !path.exists() {
         eprintln!("skipping — relay_256k.onnx absent");
@@ -761,18 +761,13 @@ fn zrt_runtime_session_factory_supports_owned_initializers() {
     let opts = SessionOptions::new()
         .with_opt_level(GraphOptimizationLevel::All)
         .with_intra_threads(1);
-    let mut runtime = ZrtRuntime::<f32>::from_session_factory(
-        2,
-        &mem,
-        &[&[1, n as i64]],
-        &[&[1, n as i64]],
-        |_| {
+    let mut runtime =
+        Runtime::<f32>::from_session_factory(2, &mem, &[&[1, n as i64]], &[&[1, n as i64]], |_| {
             let c = TensorBuffer::from_vec(vec![2.0_f32; n], &[1, n as i64], &mem)?;
             let init = OwnedInitializer::tensor("C", c)?;
             Session::new_with_owned_initializers(&env, &path, opts.clone(), vec![init])
-        },
-    )
-    .expect("runtime with owned initializers");
+        })
+        .expect("runtime with owned initializers");
 
     let y_len = runtime
         .run_on(0, |lane| {
@@ -819,6 +814,149 @@ fn iobinding_device_output() {
         "IoBinding device output OK ({} logits via GetBoundOutputValues)",
         logits.len()
     );
+}
+
+#[test]
+fn static_io_lane_runs_static_typed_io() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = Arc::new(sess);
+    let mut lane =
+        StaticIoLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+            .expect("static I/O lane");
+    lane.input_mut_at::<0>().expect("input").fill(0.0);
+    lane.run().expect("run");
+    assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+}
+
+#[test]
+fn static_io_runtime_runs_shared_typed_lanes() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = Arc::new(sess);
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        session,
+        &mem,
+        [&[1, 1, 28, 28]],
+        [&[1, 10]],
+        2,
+    )
+    .expect("static I/O runtime");
+    assert_eq!(runtime.len(), 2);
+    assert_eq!(runtime.session_mode(), RuntimeMode::SharedSession);
+
+    let len = runtime
+        .run_on(1, |lane| {
+            lane.input_mut(0)?.fill(0.0);
+            lane.run()?;
+            Ok(lane.output(0)?.len())
+        })
+        .expect("run lane");
+    assert_eq!(len, 10);
+}
+
+#[test]
+fn dynamic_io_runtime_caches_and_runs_shape_bucket() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = Arc::new(sess);
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(session, mem, 2)
+        .expect("dynamic I/O runtime");
+    assert_eq!(runtime.bucket_count(), 0);
+    assert_eq!(runtime.lane_count(), 2);
+    assert_eq!(runtime.session_mode(), RuntimeMode::SharedSession);
+
+    let len = runtime
+        .run_on([&[1, 1, 28, 28]], [&[1, 10]], 1, |lane| {
+            lane.input_mut_at::<0>()?.fill(0.0);
+            lane.run()?;
+            Ok(lane.output_at::<0>()?.len())
+        })
+        .expect("dynamic run");
+    assert_eq!(len, 10);
+    assert_eq!(runtime.bucket_count(), 1);
+
+    runtime
+        .run_on([&[1, 1, 28, 28]], [&[1, 10]], 0, |lane| {
+            lane.input_mut(0)?.fill(0.0);
+            lane.run()
+        })
+        .expect("dynamic cached run");
+    assert_eq!(runtime.bucket_count(), 1);
+    assert_eq!(
+        runtime.buckets()[0].key().input_shape(0),
+        Some(&[1, 1, 28, 28][..])
+    );
+
+    runtime
+        .prime_bucket([&[1, 1, 28, 28]], [&[1, 10]], 1)
+        .expect("prime cached bucket");
+    assert!(runtime.remove_bucket([&[1, 1, 28, 28]], [&[1, 10]]));
+    assert_eq!(runtime.bucket_count(), 0);
+
+    runtime
+        .get_or_create_bucket([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("recreate bucket");
+    assert_eq!(runtime.bucket_count(), 1);
+    runtime.clear_buckets();
+    assert_eq!(runtime.bucket_count(), 0);
+}
+
+#[test]
+fn dynamic_io_runtime_bounds_shape_buckets() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let output_mem = mem.try_clone_descriptor().expect("output mem");
+    let session = Arc::new(sess);
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        session,
+        mem,
+        output_mem,
+        1,
+        DynamicIoOptions::new(1),
+    )
+    .expect("dynamic I/O runtime");
+
+    runtime
+        .get_or_create_bucket([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("first bucket");
+    assert_eq!(runtime.bucket_count(), 1);
+    assert!(runtime.bucket([&[1, 1, 28, 28]], [&[1, 10]]).is_some());
+
+    runtime
+        .get_or_create_bucket([&[1, 1, 28, 29]], [&[1, 10]])
+        .expect("second bucket");
+    assert_eq!(runtime.bucket_count(), 1);
+    assert!(runtime.bucket([&[1, 1, 28, 28]], [&[1, 10]]).is_none());
+    assert!(runtime.bucket([&[1, 1, 28, 29]], [&[1, 10]]).is_some());
 }
 
 #[test]

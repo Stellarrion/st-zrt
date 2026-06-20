@@ -1,6 +1,6 @@
 use st_zrt::{
-    Environment, GraphOptimizationLevel, MemoryInfo, OutputValue, Session, SessionOptions, Tensor,
-    TensorBuffer, ZrtLaneSet,
+    DynamicIoRuntime, Environment, GraphOptimizationLevel, MemoryInfo, OutputValue, Runtime,
+    Session, SessionOptions, StaticIoRuntime, Tensor, TensorBuffer,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -295,7 +295,7 @@ fn tensor_io_lanes_are_rust_zero_alloc() {
 }
 
 #[test]
-fn zrt_lane_set_runs_are_rust_zero_alloc() {
+fn runtime_runs_are_rust_zero_alloc() {
     let _guard = test_guard();
     let Some((_env, mem, sess)) = mnist_session() else {
         eprintln!("skipping — mnist.onnx absent");
@@ -303,7 +303,7 @@ fn zrt_lane_set_runs_are_rust_zero_alloc() {
     };
 
     let mut lanes =
-        ZrtLaneSet::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
+        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
             .expect("lane set");
     for lane in lanes.lanes_mut() {
         lane.run().expect("warmup");
@@ -315,7 +315,75 @@ fn zrt_lane_set_runs_are_rust_zero_alloc() {
             assert_eq!(lane.output(0).expect("lane output").len(), 10);
         }
     });
-    assert_eq!(allocs, 0, "ZrtLaneSet runs allocated {allocs} times");
+    assert_eq!(allocs, 0, "Runtime runs allocated {allocs} times");
+}
+
+#[test]
+fn static_io_runtime_runs_are_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+
+    let mut lanes = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        Arc::new(sess),
+        &mem,
+        [&[1, 1, 28, 28]],
+        [&[1, 10]],
+        2,
+    )
+    .expect("static I/O lane set");
+    for lane in lanes.lanes_mut() {
+        lane.run().expect("warmup");
+    }
+
+    let allocs = measured_allocs(|| {
+        for lane in lanes.lanes_mut() {
+            lane.run().expect("static I/O lane run");
+            assert_eq!(lane.output_at::<0>().expect("lane output").len(), 10);
+        }
+    });
+    assert_eq!(allocs, 0, "StaticIoRuntime runs allocated {allocs} times");
+}
+
+#[test]
+fn dynamic_io_runtime_cached_runs_are_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 2)
+        .expect("dynamic I/O runtime");
+    runtime
+        .run_on([&[1, 1, 28, 28]], [&[1, 10]], 0, |lane| {
+            lane.input_mut_at::<0>()?.fill(0.0);
+            lane.run()
+        })
+        .expect("create and warm bucket");
+    for _ in 0..4 {
+        runtime
+            .run_on([&[1, 1, 28, 28]], [&[1, 10]], 1, |lane| lane.run())
+            .expect("warm cached bucket");
+    }
+    assert_eq!(runtime.bucket_count(), 1);
+
+    let allocs = measured_allocs(|| {
+        runtime
+            .run_on([&[1, 1, 28, 28]], [&[1, 10]], 1, |lane| {
+                lane.input_mut(0).expect("lane input").fill(0.0);
+                lane.run().expect("dynamic I/O lane run");
+                assert_eq!(lane.output(0).expect("lane output").len(), 10);
+                Ok(())
+            })
+            .expect("cached dynamic run");
+    });
+    assert_eq!(
+        allocs, 0,
+        "DynamicIoRuntime cached run allocated {allocs} times"
+    );
 }
 
 #[test]

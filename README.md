@@ -19,7 +19,7 @@ primitives to wire inference without wrapper overhead.
 
 - **Zero-copy tensor I/O**: wrap caller-owned buffers with `Tensor::from_buffer`.
 - **Prepared hot paths**: pre-marshaled names, shapes, bindings, run options, and lane buffers.
-- **Explicit concurrency**: `ZrtRuntime` and `ZrtLaneSet` expose lanes directly instead of locking a
+- **Explicit concurrency**: `Runtime` exposes lanes directly instead of locking a
   shared session pool.
 - **Configurable output memory**: caller-owned buffers, ORT-allocator-owned outputs, aligned and
   prefaulted lane buffers, hugepage hints, optional `mlock`, CPU or device outputs.
@@ -29,6 +29,22 @@ primitives to wire inference without wrapper overhead.
   prepacked weights, profiling, threading, graph/model editing, AOT compile, and interop wrappers.
 - **Generated FFI**: `st-zrt-sys` mirrors ONNX Runtime 1.26.0 with a zrt-namespaced raw table and no
   `bindgen`.
+
+## Measured Integration Result
+
+`st-zrt` replaced the Rust `ort` wrapper in a real downstream embedding service benchmark
+(`rs-celer`, BGE small ONNX model, CPU, batch 8 x sequence 64):
+
+```text
+cargo bench --features cpu --bench hot_path -- --warm-up-time 1 --measurement-time 2 --sample-size 10
+
+Rust ort wrapper: [43.396 ms 49.779 ms 57.252 ms]
+st-zrt:           [34.501 ms 35.155 ms 35.624 ms]
+```
+
+That run was **29.8% faster on the mean** and had a much tighter latency spread. This compares the
+Rust wrapper layer and session/input/output path around ONNX Runtime; ONNX Runtime itself still
+provides the kernels and graph execution.
 
 ## Install
 

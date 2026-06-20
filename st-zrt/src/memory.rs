@@ -123,6 +123,20 @@ impl MemoryInfo {
         snapshot_from_ptr(self.info as *const sys::MemoryInfoHandle)
     }
 
+    /// Create a fresh ORT memory-info handle with the same descriptor fields.
+    pub fn try_clone_descriptor(&self) -> Result<Self> {
+        let snapshot = self.snapshot()?;
+        if snapshot.name == "Cpu" {
+            return Self::cpu();
+        }
+        Self::new_named(
+            &snapshot.name,
+            snapshot.alloc_type,
+            snapshot.device_id,
+            snapshot.mem_type,
+        )
+    }
+
     /// Whether a Rust slice may safely read/write this memory directly.
     pub fn is_host_accessible(&self) -> Result<bool> {
         Ok(self.snapshot()?.is_host_accessible())

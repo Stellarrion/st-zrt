@@ -85,7 +85,10 @@ pub use model_editor::{
 };
 pub use prepacked::PrepackedWeightsContainer;
 pub use run_options::RunOptions;
-pub use runtime::{ZrtLane, ZrtLaneSet, ZrtRuntime, ZrtRuntimeMode};
+pub use runtime::{
+    DynamicIoOptions, DynamicIoRuntime, Lane, Runtime, RuntimeMode, ShapeBucket, ShapeKey,
+    StaticIoLane, StaticIoRuntime,
+};
 pub use session::{
     AllocatedOutputTensorIoLane, AllocatedTensorIoLane, DeviceOutputTensorIoLane, LaneBufferPolicy,
     LaneRunAllocatorStats, PreparedIoBinding, PreparedRun, RunFuture, Session, StaticTensorIoLane,
