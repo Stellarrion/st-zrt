@@ -53,23 +53,23 @@ provides the kernels and graph execution.
 
 ```toml
 [dependencies]
-st-zrt = "0.1"
+st-zrt = "0.1.1"
 ```
 
 The default feature set covers CPU inference. Optional surfaces are explicit:
 
 ```toml
 # Execution-provider option builders and EP device discovery.
-st-zrt = { version = "0.1", features = ["ep"] }
+st-zrt = { version = "0.1.1", features = ["ep"] }
 
 # CUDA ONNX Runtime build and strict CUDA inference tests. Implies `ep`.
-st-zrt = { version = "0.1", features = ["cuda"] }
+st-zrt = { version = "0.1.1", features = ["cuda"] }
 
 # Safe Rust custom operator authoring.
-st-zrt = { version = "0.1", features = ["custom-ops"] }
+st-zrt = { version = "0.1.1", features = ["custom-ops"] }
 
 # Graph/model editing and AOT compile wrappers.
-st-zrt = { version = "0.1", features = ["model-editor"] }
+st-zrt = { version = "0.1.1", features = ["model-editor"] }
 ```
 
 On first build, `st-zrt-sys` downloads and SHA-256 verifies the matching ONNX Runtime archive. To
@@ -227,7 +227,7 @@ cargo check -p st-zrt --all-features
 Release checks are tag-bound:
 
 ```bash
-git tag -a st-zrt-v0.1.0 -m "st-zrt v0.1.0"
+git tag -a st-zrt-v0.1.1 -m "st-zrt v0.1.1"
 scripts/release-check.sh pre-sys-publish
 ```
 
