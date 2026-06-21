@@ -46,6 +46,10 @@ pub struct SessionOptions {
     pub(crate) inter_threads: Option<i32>,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) execution_mode: Option<sys::ExecutionMode>,
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_support::opt_cstr"))]
+    pub(crate) log_id: Option<CString>,
+    pub(crate) log_severity: Option<i32>,
+    pub(crate) log_verbosity: Option<i32>,
     pub(crate) cpu_mem_arena: ArenaState,
     pub(crate) mem_pattern: MemPatternState,
     pub(crate) use_global_thread_pool: bool,
@@ -91,6 +95,9 @@ impl Default for SessionOptions {
             intra_threads: None,
             inter_threads: None,
             execution_mode: None,
+            log_id: None,
+            log_severity: None,
+            log_verbosity: None,
             cpu_mem_arena: ArenaState::Default,
             mem_pattern: MemPatternState::Default,
             use_global_thread_pool: true,
@@ -159,6 +166,29 @@ impl SessionOptions {
     #[inline]
     pub fn with_parallel_execution(self) -> Self {
         self.with_execution_mode(sys::ExecutionMode::Parallel)
+    }
+
+    /// Set the ORT session log id (`SetSessionLogId`).
+    pub fn with_log_id(mut self, id: &str) -> std::result::Result<Self, std::ffi::NulError> {
+        self.log_id = Some(CString::new(id)?);
+        Ok(self)
+    }
+
+    /// Set the ORT session log severity (`SetSessionLogSeverityLevel`).
+    ///
+    /// `Verbose` is useful when diagnosing execution-provider placement and inserted Memcpy
+    /// nodes during session creation.
+    #[inline]
+    pub fn with_log_severity(mut self, level: sys::LoggingLevel) -> Self {
+        self.log_severity = Some(level as i32);
+        self
+    }
+
+    /// Set the ORT session log verbosity (`SetSessionLogVerbosityLevel`).
+    #[inline]
+    pub fn with_log_verbosity(mut self, level: i32) -> Self {
+        self.log_verbosity = Some(level);
+        self
     }
 
     /// Use the environment's global thread pool when the environment was created with one.
@@ -302,6 +332,15 @@ impl SessionOptions {
             if let Some(mode) = self.execution_mode {
                 check(unsafe { api.set_session_execution_mode()(opts, mode) })?;
             }
+            if let Some(log_id) = &self.log_id {
+                check(unsafe { api.set_session_log_id()(opts, log_id.as_ptr()) })?;
+            }
+            if let Some(level) = self.log_severity {
+                check(unsafe { api.set_session_log_severity_level()(opts, level) })?;
+            }
+            if let Some(level) = self.log_verbosity {
+                check(unsafe { api.set_session_log_verbosity_level()(opts, level) })?;
+            }
             match self.cpu_mem_arena {
                 ArenaState::Default => {},
                 ArenaState::Enabled => check(unsafe { api.enable_cpu_mem_arena()(opts) })?,
@@ -375,6 +414,10 @@ mod tests {
             .with_intra_threads(1)
             .with_inter_threads(1)
             .with_parallel_execution()
+            .with_log_id("advanced-options")
+            .expect("log id")
+            .with_log_severity(sys::LoggingLevel::Verbose)
+            .with_log_verbosity(1)
             .with_free_dimension_override("DATA_BATCH", 4)
             .expect("free dim denotation")
             .with_free_dimension_override_by_name("batch", 4)
@@ -402,6 +445,10 @@ mod serde_tests {
             .with_intra_threads(4)
             .with_inter_threads(2)
             .with_parallel_execution()
+            .with_log_id("serde-session")
+            .expect("log id")
+            .with_log_severity(sys::LoggingLevel::Warning)
+            .with_log_verbosity(2)
             .disable_cpu_mem_arena()
             .disable_mem_pattern()
             .with_free_dimension_override("DATA_BATCH", 4)
@@ -425,12 +472,27 @@ mod serde_tests {
             json.contains("\"session.run\""),
             "config key present: {json}"
         );
+        assert!(json.contains("\"serde-session\""), "log id present: {json}");
+        assert!(
+            json.contains("\"log_severity\":2"),
+            "log severity present: {json}"
+        );
+        assert!(
+            json.contains("\"log_verbosity\":2"),
+            "log verbosity present: {json}"
+        );
 
         let back: SessionOptions = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.opt_level, sys::GraphOptimizationLevel::Extended);
         assert_eq!(back.intra_threads, Some(4));
         assert_eq!(back.inter_threads, Some(2));
         assert_eq!(back.execution_mode, None);
+        assert_eq!(
+            back.log_id.as_ref().and_then(|id| id.to_str().ok()),
+            Some("serde-session")
+        );
+        assert_eq!(back.log_severity, Some(sys::LoggingLevel::Warning as i32));
+        assert_eq!(back.log_verbosity, Some(2));
         assert_eq!(back.cpu_mem_arena, ArenaState::Disabled);
         assert_eq!(back.mem_pattern, MemPatternState::Disabled);
         assert_eq!(

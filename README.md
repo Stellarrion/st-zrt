@@ -26,7 +26,10 @@ primitives to wire inference without wrapper overhead.
 - **Broad ONNX data surface**: numeric tensors, strings, sparse tensors, sequence/map reads,
   metadata, IoBinding, owned initializers, mmap-backed dense weights.
 - **Advanced ORT surfaces**: custom ops, provider config/discovery, CUDA builds, async runs,
-  prepacked weights, profiling, threading, graph/model editing, AOT compile, and interop wrappers.
+  prepacked weights, profiling, threading, session logging, graph/model editing, AOT compile, and
+  interop wrappers.
+- **Provider-aware serving controls**: IoBinding synchronization and opt-in per-run input rebinding
+  for reusable CUDA/TensorRT lanes that need stricter input freshness.
 - **Generated FFI**: `st-zrt-sys` mirrors ONNX Runtime 1.26.0 with a zrt-namespaced raw table and no
   `bindgen`.
 
@@ -112,6 +115,7 @@ cargo run -p st-zrt --example primed_lane -- path/to/model.onnx
 cargo run -p st-zrt --example sparse_tensor
 cargo run -p st-zrt --example ep_config --features ep
 cargo run -p st-zrt --example cuda_inference --features cuda -- path/to/model.onnx
+cargo run -p st-zrt --example bert_cuda_probe --features cuda -- path/to/model_cuda.onnx
 ```
 
 Some examples default to local benchmark models when present. Those models are intentionally not
@@ -147,6 +151,32 @@ This is the API shape `st-zrt` is built around:
 storage for large static tensors. Very large buffers receive a best-effort Linux hugepage hint.
 Explicit policies are available when you need predictable memory behavior.
 
+CUDA and TensorRT callers that mutate reusable CPU input buffers can opt into stricter binding
+freshness:
+
+```rust
+lane.set_rebind_inputs_each_run(true);
+```
+
+For dynamic shape-bucketed runtimes, use
+`DynamicIoOptions::new(max_buckets).with_rebind_inputs_each_run(true)`. The default remains
+bind-once because it preserves the zero-allocation CPU serving contract.
+
+## Diagnostics
+
+Session-level ORT logging is available through `SessionOptions`:
+
+```rust
+let opts = SessionOptions::new()
+    .with_log_id("placement-debug")?
+    .with_log_severity(st_zrt::LoggingLevel::Verbose)
+    .with_log_verbosity(1);
+```
+
+This is useful for execution-provider placement, graph optimization, and CUDA Memcpy diagnostics.
+The `bert_cuda_probe` example is intentionally diagnostic: it compares normal `Session::run` with
+reusable static I/O on BERT-style text encoder ONNX graphs.
+
 ## Feature Matrix
 
 | Feature | Surface |
@@ -157,7 +187,7 @@ Explicit policies are available when you need predictable memory behavior.
 | `ep` | CUDA, TensorRT, ROCm, CANN, DNNL, OpenVINO, VitisAI, MIGraphX option builders plus EP device discovery |
 | `cuda` | GPU ONNX Runtime build with CUDA 12 runtime libraries; implies `ep` |
 | `custom-ops` | Safe Rust custom operator registration and kernel callbacks |
-| `model-editor` | Graph/model editing, model serialization, AOT compile, EP registry gateway, external-memory interop |
+| `model-editor` | Graph/model editing, attributed nodes, model serialization, AOT compile, EP registry gateway, external-memory interop |
 | `training` | Reserved for ONNX Runtime training packages |
 
 CUDA is currently Linux x86_64 focused. The `cuda` feature downloads the GPU ORT package and CUDA

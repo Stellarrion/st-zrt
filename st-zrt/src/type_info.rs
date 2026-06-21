@@ -185,6 +185,21 @@ mod tests {
     }
 
     #[test]
+    fn type_info_accepts_newer_quantized_metadata_element_types() {
+        for ty in [
+            sys::ElementType::Float8E4M3FN,
+            sys::ElementType::Float8E5M2,
+            sys::ElementType::Uint4,
+            sys::ElementType::Int4,
+            sys::ElementType::Float4E2M1,
+        ] {
+            let mut info = TensorTypeAndShapeInfo::new().expect("new");
+            info.set_element_type(ty).expect("set elem type");
+            assert_eq!(info.element_type().unwrap(), ty);
+        }
+    }
+
+    #[test]
     fn checked_element_count_rejects_dynamic_and_overflow() {
         assert_eq!(checked_element_count(&[1, 1000]).unwrap(), 1000);
         assert!(checked_element_count(&[-1, 1000]).is_err());

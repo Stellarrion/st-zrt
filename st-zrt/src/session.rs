@@ -505,6 +505,23 @@ impl Session {
         result
     }
 
+    #[cfg(feature = "model-editor")]
+    fn refresh_io_metadata(&mut self) -> Result<()> {
+        let alloc = Allocator::get_default()?;
+        let (input_names, input_ptrs) = collect_io_names(self.sess, true, &alloc)?;
+        let (output_names, output_ptrs) = collect_io_names(self.sess, false, &alloc)?;
+        let input_meta = collect_io_meta(self.sess, true, input_ptrs.len())?;
+        let output_meta = collect_io_meta(self.sess, false, output_ptrs.len())?;
+
+        self.input_names = input_names;
+        self.input_ptrs = input_ptrs;
+        self.input_meta = input_meta;
+        self.output_names = output_names;
+        self.output_ptrs = output_ptrs;
+        self.output_meta = output_meta;
+        Ok(())
+    }
+
     /// The model's metadata (producer, graph name/description, domain, version, custom
     /// metadata map). Owning handle (`SessionGetModelMetadata`, idx 111); released on drop.
     pub fn metadata(&self) -> Result<crate::metadata::ModelMetadata> {
@@ -1176,9 +1193,11 @@ impl Session {
     /// name), bypassing the per-run name arrays and — for caller-buffer outputs — the per-run
     /// output allocation. Thread-safe like [`Self::run`]; reuses the session's `RunOptions`.
     pub fn run_binding(&self, binding: &crate::io_binding::IoBinding) -> Result<()> {
+        binding.synchronize_inputs()?;
         check(unsafe {
             api().run_with_binding()(self.sess, self.run_opts.as_ptr(), binding.as_ptr())
-        })
+        })?;
+        binding.synchronize_outputs()
     }
 
     /// Run with an [`crate::IoBinding`] and a caller-provided [`RunOptions`] (per-call config
@@ -1186,7 +1205,9 @@ impl Session {
     pub fn run_binding_with(
         &self, binding: &crate::io_binding::IoBinding, opts: &RunOptions,
     ) -> Result<()> {
-        check(unsafe { api().run_with_binding()(self.sess, opts.as_ptr(), binding.as_ptr()) })
+        binding.synchronize_inputs()?;
+        check(unsafe { api().run_with_binding()(self.sess, opts.as_ptr(), binding.as_ptr()) })?;
+        binding.synchronize_outputs()
     }
 
     /// Run the model asynchronously (`RunAsync`, IDX 260) on an ORT worker thread. Returns a
@@ -1880,7 +1901,7 @@ impl Session {
 
     /// Finalize a model-editor session after any [`Self::apply_model`]
     /// (`FinalizeModelEditorSession`) — validates + prepares it for inference.
-    pub fn finalize(&self, opts: &SessionOptions) -> Result<()> {
+    pub fn finalize(&mut self, opts: &SessionOptions) -> Result<()> {
         let me = crate::model_editor::model_editor_api()
             .ok_or_else(|| crate::Error::new(-1, "ModelEditorApi unavailable"))?;
         let finalize = crate::model_editor::require_sub_api_fn(
@@ -1899,7 +1920,8 @@ impl Session {
             )
         });
         unsafe { api().release_session_options()(opts_handle) };
-        r
+        r?;
+        self.refresh_io_metadata()
     }
 }
 

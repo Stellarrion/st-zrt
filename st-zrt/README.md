@@ -5,7 +5,7 @@ Safe, zero-overhead Rust runtime bindings for ONNX Runtime 1.26.
 `st-zrt` keeps ONNX Runtime as the kernel engine and focuses on the Rust boundary: zero-copy caller
 buffers, prepared fixed-shape I/O, explicit lane-based serving, sparse tensors, IoBinding,
 profiling, threading options, async runs, custom ops, CUDA/provider configuration, mmap-backed
-dense initializers, and model-editor access behind feature gates.
+dense initializers, session logging, and model-editor access behind feature gates.
 
 ```rust
 use st_zrt::{
@@ -37,7 +37,7 @@ Feature flags:
 - `ep`: execution-provider option builders and device discovery.
 - `cuda`: CUDA ONNX Runtime build and strict GPU inference tests; implies `ep`.
 - `custom-ops`: safe Rust custom operator authoring.
-- `model-editor`: graph/model editing, AOT compile, EP registry and interop wrappers.
+- `model-editor`: graph/model editing, attributed nodes, AOT compile, EP registry and interop wrappers.
 
 Examples:
 
@@ -48,7 +48,13 @@ cargo run --example mmap_initializer
 cargo run --example sparse_tensor
 cargo run --example ep_config --features ep
 cargo run --example cuda_inference --features cuda
+cargo run --example bert_cuda_probe --features cuda -- /path/to/model_cuda.onnx
 ```
+
+Reusable lanes bind inputs once by default for the CPU zero-allocation hot path. CUDA/TensorRT
+callers that mutate reusable CPU input buffers can opt into per-run input rebinding with
+`StaticIoLane::set_rebind_inputs_each_run(true)` or
+`DynamicIoOptions::with_rebind_inputs_each_run(true)`.
 
 The raw generated FFI lives in `st-zrt-sys`.
 

@@ -59,6 +59,7 @@ pub struct StaticIoLane<
     inputs: [TensorBuffer<I>; INPUTS],
     outputs: [TensorBuffer<O>; OUTPUTS],
     session: Arc<Session>,
+    rebind_inputs_each_run: bool,
 }
 
 impl<T> Lane<T>
@@ -273,6 +274,7 @@ where
             inputs,
             outputs,
             session,
+            rebind_inputs_each_run: false,
         })
     }
 }
@@ -283,6 +285,13 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
     /// Execute this lane's pre-bound IoBinding.
     #[inline]
     pub fn run(&mut self) -> Result<()> {
+        if self.rebind_inputs_each_run {
+            self.binding.clear_inputs();
+            for (i, input) in self.inputs.iter().enumerate() {
+                self.binding
+                    .bind_input(self.session.input_name(i)?, input)?;
+            }
+        }
         self.session.run_binding(&self.binding)
     }
 
@@ -410,6 +419,16 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
     pub fn session(&self) -> &Session {
         &self.session
     }
+
+    /// Rebind inputs before every run.
+    ///
+    /// This is not the default because it adds per-run name marshaling and breaks the
+    /// bind-once zero-allocation CPU contract. It is useful for CUDA paths where ORT's
+    /// reusable CPU input binding can otherwise observe stale mutated input buffers.
+    #[inline]
+    pub fn set_rebind_inputs_each_run(&mut self, enabled: bool) {
+        self.rebind_inputs_each_run = enabled;
+    }
 }
 
 fn build_shared_lanes<T>(
@@ -458,6 +477,8 @@ pub struct DynamicIoOptions {
     pub input_policy: LaneBufferPolicy,
     /// Buffer policy used for output tensors when a new shape bucket is created.
     pub output_policy: LaneBufferPolicy,
+    /// Rebind lane input values before each run.
+    pub rebind_inputs_each_run: bool,
 }
 
 impl DynamicIoOptions {
@@ -484,6 +505,13 @@ impl DynamicIoOptions {
         self
     }
 
+    /// Enable or disable per-run input rebinding for newly-created static shape buckets.
+    #[inline]
+    pub fn with_rebind_inputs_each_run(mut self, enabled: bool) -> Self {
+        self.rebind_inputs_each_run = enabled;
+        self
+    }
+
     fn validate(self) -> Result<Self> {
         if self.max_buckets == 0 {
             return Err(Error::new(
@@ -502,6 +530,7 @@ impl Default for DynamicIoOptions {
             max_buckets: 16,
             input_policy: LaneBufferPolicy::Auto,
             output_policy: LaneBufferPolicy::Auto,
+            rebind_inputs_each_run: false,
         }
     }
 }
@@ -1166,6 +1195,14 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
         }
         Ok(())
     }
+
+    /// Set whether all lanes rebind inputs before every run.
+    #[inline]
+    pub fn set_rebind_inputs_each_run(&mut self, enabled: bool) {
+        for lane in &mut self.lanes {
+            lane.set_rebind_inputs_each_run(enabled);
+        }
+    }
 }
 
 impl<I, O, const INPUTS: usize, const OUTPUTS: usize> DynamicIoRuntime<I, O, INPUTS, OUTPUTS>
@@ -1297,7 +1334,7 @@ where
     fn build_lane_set(
         &self, input_shapes: [&[i64]; INPUTS], output_shapes: [&[i64]; OUTPUTS],
     ) -> Result<StaticIoRuntime<I, O, INPUTS, OUTPUTS>> {
-        match &self.sessions {
+        let mut lanes = match &self.sessions {
             DynamicSessions::Shared(session) => StaticIoRuntime::shared_session_with_buffer_policy(
                 session.clone(),
                 &self.input_mem,
@@ -1319,7 +1356,9 @@ where
                     self.options.output_policy,
                 )
             },
-        }
+        }?;
+        lanes.set_rebind_inputs_each_run(self.options.rebind_inputs_each_run);
+        Ok(lanes)
     }
 
     fn find_bucket_index(

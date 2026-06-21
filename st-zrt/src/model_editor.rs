@@ -173,12 +173,95 @@ impl Drop for ValueInfo {
 pub struct Node {
     ptr: *mut sys::NodeHandle,
 }
+
+/// `OrtOpAttr` — owning (`ReleaseOpAttr`). MOVED into [`Node::with_attributes`].
+///
+/// This is intentionally scoped to graph construction. It covers the scalar and array
+/// attributes needed by normal ONNX ops without enabling the custom-op feature.
+pub struct NodeAttr {
+    ptr: *mut sys::OpAttrHandle,
+}
+
+impl NodeAttr {
+    fn new(name: &str, data: &[u8], len: usize, ty: sys::OpAttrType) -> Result<Self> {
+        let name = CString::new(name)?;
+        let len = i32::try_from(len)
+            .map_err(|_| crate::Error::new(-1, "model-editor attribute length overflows i32"))?;
+        let mut out: *mut sys::OpAttrHandle = ptr::null_mut();
+        check(unsafe {
+            api().create_op_attr()(
+                name.as_ptr(),
+                data.as_ptr() as *const c_void,
+                len,
+                ty,
+                &mut out,
+            )
+        })?;
+        let out = crate::ensure_non_null(out, "model-editor op attribute")?;
+        Ok(Self { ptr: out })
+    }
+
+    /// Scalar int64 attribute.
+    pub fn int(name: &str, value: i64) -> Result<Self> {
+        Self::new(
+            name,
+            value.to_ne_bytes().as_slice(),
+            1,
+            sys::OpAttrType::Int,
+        )
+    }
+
+    /// Scalar float attribute.
+    pub fn float(name: &str, value: f32) -> Result<Self> {
+        Self::new(
+            name,
+            value.to_ne_bytes().as_slice(),
+            1,
+            sys::OpAttrType::Float,
+        )
+    }
+
+    /// int64 array attribute.
+    pub fn ints(name: &str, values: &[i64]) -> Result<Self> {
+        Self::new(
+            name,
+            unsafe {
+                std::slice::from_raw_parts(
+                    values.as_ptr() as *const u8,
+                    std::mem::size_of_val(values),
+                )
+            },
+            values.len(),
+            sys::OpAttrType::Ints,
+        )
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut sys::OpAttrHandle {
+        self.ptr
+    }
+}
+
+impl Drop for NodeAttr {
+    fn drop(&mut self) {
+        unsafe { api().release_op_attr()(self.ptr) }
+    }
+}
+
 impl Node {
     /// An op node (no attributes). `inputs` / `outputs` are the names of the graph values
     /// the node reads / writes (graph inputs, initializer names, or other nodes' outputs) —
     /// not [`ValueInfo`]s.
     pub fn new(
         op: &str, domain: &str, name: &str, inputs: &[&str], outputs: &[&str],
+    ) -> Result<Self> {
+        Self::with_attributes(op, domain, name, inputs, outputs, Vec::new())
+    }
+
+    /// An op node with ONNX attributes. CONSUMES the attributes because ORT takes ownership
+    /// when node creation succeeds.
+    pub fn with_attributes(
+        op: &str, domain: &str, name: &str, inputs: &[&str], outputs: &[&str],
+        attributes: Vec<NodeAttr>,
     ) -> Result<Self> {
         let cop = CString::new(op)?;
         let cdom = CString::new(domain)?;
@@ -193,6 +276,13 @@ impl Node {
             .collect::<std::result::Result<_, _>>()?;
         let in_p: Vec<*const c_char> = in_c.iter().map(|c| c.as_ptr()).collect();
         let out_p: Vec<*const c_char> = out_c.iter().map(|c| c.as_ptr()).collect();
+        let mut attr_p: Vec<*mut sys::OpAttrHandle> =
+            attributes.iter().map(|attr| attr.as_ptr()).collect();
+        let attr_ptr = if attr_p.is_empty() {
+            ptr::null_mut()
+        } else {
+            attr_p.as_mut_ptr()
+        };
         let create = require_sub_api_fn(me()?.CreateNode, "ModelEditorApi", "CreateNode")?;
         let mut p: *mut sys::NodeHandle = ptr::null_mut();
         check(unsafe {
@@ -204,12 +294,15 @@ impl Node {
                 in_p.len(),
                 out_p.as_ptr(),
                 out_p.len(),
-                ptr::null_mut(), // attributes (none)
-                0,
+                attr_ptr,
+                attr_p.len(),
                 &mut p,
             )
         })?;
         let p = crate::ensure_non_null(p, "model-editor node")?;
+        for attr in attributes {
+            std::mem::forget(attr); // node took ownership — do not ReleaseOpAttr
+        }
         Ok(Self { ptr: p })
     }
 }

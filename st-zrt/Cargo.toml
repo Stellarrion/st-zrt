@@ -1,6 +1,6 @@
 [package]
 name = "st-zrt"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -55,6 +55,10 @@ required-features = ["ep"]
 
 [[example]]
 name = "cuda_inference"
+required-features = ["cuda"]
+
+[[example]]
+name = "bert_cuda_probe"
 required-features = ["cuda"]
 
 [[test]]

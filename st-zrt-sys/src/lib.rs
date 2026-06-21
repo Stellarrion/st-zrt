@@ -53,7 +53,16 @@ pub enum ElementType {
     Double = 11,
     Uint32 = 12,
     Uint64 = 13,
+    Complex64 = 14,
+    Complex128 = 15,
     Bfloat16 = 16,
+    Float8E4M3FN = 17,
+    Float8E4M3FNUZ = 18,
+    Float8E5M2 = 19,
+    Float8E5M2FNUZ = 20,
+    Uint4 = 21,
+    Int4 = 22,
+    Float4E2M1 = 23,
 }
 
 /// OrtLoggingLevel (a.k.a. LogLevel).

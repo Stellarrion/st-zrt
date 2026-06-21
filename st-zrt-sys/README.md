@@ -11,6 +11,7 @@ What is different:
 - no `bindgen`;
 - no public legacy `Ort*` type names;
 - checked-in generated table from the workspace codegen tool;
+- newer ONNX element metadata variants including complex, float8, int4/uint4, and float4;
 - pure-Rust download, SHA-256 verification, and archive extraction in `build.rs`;
 - optional feature gates for EP, CUDA, custom-op, model-editor, and training symbols.
 

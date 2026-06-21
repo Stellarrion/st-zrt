@@ -81,7 +81,7 @@ pub use metadata::ModelMetadata;
 #[cfg(feature = "model-editor")]
 pub use model_editor::{
     compile_api, ep_api, interop_api, model_editor_api, Graph, Model, ModelCompilationOptions,
-    Node, TypeInfo, ValueInfo,
+    Node, NodeAttr, TypeInfo, ValueInfo,
 };
 pub use prepacked::PrepackedWeightsContainer;
 pub use run_options::RunOptions;
@@ -155,9 +155,33 @@ pub(crate) fn element_size(e: sys::ElementType) -> usize {
     use sys::ElementType::*;
     match e {
         Float | Int32 | Uint32 => 4,
-        Double | Int64 | Uint64 => 8,
+        Double | Int64 | Uint64 | Complex64 => 8,
+        Complex128 => 16,
         Uint16 | Int16 | Float16 | Bfloat16 => 2,
-        Uint8 | Int8 | Bool => 1,
+        Uint8 | Int8 | Bool | Float8E4M3FN | Float8E4M3FNUZ | Float8E5M2 | Float8E5M2FNUZ => 1,
+        Uint4 | Int4 | Float4E2M1 => 0,
         Undefined | String => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{element_size, sys::ElementType};
+
+    #[test]
+    fn element_size_covers_quantized_and_float8_metadata_types() {
+        assert_eq!(element_size(ElementType::Int8), 1);
+        assert_eq!(element_size(ElementType::Uint8), 1);
+        assert_eq!(element_size(ElementType::Float8E4M3FN), 1);
+        assert_eq!(element_size(ElementType::Float8E4M3FNUZ), 1);
+        assert_eq!(element_size(ElementType::Float8E5M2), 1);
+        assert_eq!(element_size(ElementType::Float8E5M2FNUZ), 1);
+
+        // Packed 4-bit tensors are not exposed as a typed Rust slice. ORT may
+        // run graphs that contain these types internally, but ZRT reports them
+        // as opaque metadata until a packed storage wrapper exists.
+        assert_eq!(element_size(ElementType::Int4), 0);
+        assert_eq!(element_size(ElementType::Uint4), 0);
+        assert_eq!(element_size(ElementType::Float4E2M1), 0);
     }
 }
