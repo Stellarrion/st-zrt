@@ -36,7 +36,7 @@ cuda = []
 [build-dependencies]
 # Pure-Rust download / verify / extract - no system curl, tar, or sha256sum. This is
 # what makes the build reproducible across Linux/macOS/Windows runners.
-ureq = "2.12"
+ureq = "3.3"
 sha2 = "0.10"
 hex = "0.4"
 flate2 = "1"
