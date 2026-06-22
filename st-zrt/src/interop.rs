@@ -8,17 +8,9 @@
 //! wait / signal calls are type-checked + gateway-verified here but cannot run on a CPU-only
 //! host. The CPU-runnable surface is the gateway check + the null-tolerant release functions.
 //!
-//! The descriptor structs + handle-type enums are hand-written `#[repr(C)]` here — the codegen
-//! erased them to opaque handles. Layouts follow `onnxruntime_c_api.h` (field order + the C
-//! ABI); `const` size-asserts pin the field count.
-//!
-//! # Codegen caveat
-//! `CanImportMemory` / `CanImportSemaphore` pass `OrtExternalMemoryHandleType` /
-//! `OrtExternalSemaphoreType` **by value** (a 4-byte `i32` enum), but the codegen emitted those
-//! params as the 8-byte opaque `…Handle` structs. Calling through the generated signature would
-//! be an ABI mismatch, so those two calls transmute the fn pointer to the true
-//! `(importer, i32, &mut bool)` ABI (same C function underneath).
-use crate::{check, sys, Result};
+//! The descriptor structs + handle-type enums are hand-written `#[repr(C)]` here. Layouts follow
+//! `onnxruntime_c_api.h` (field order + the C ABI); `const` size-asserts pin the field count.
+use crate::{Result, check, sys};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr;
@@ -238,16 +230,7 @@ impl ExternalResourceImporter {
     /// Whether the importer can import `handle_type` memory.
     pub fn can_import_memory(&self, handle_type: ExternalMemoryHandleType) -> Result<bool> {
         let mut supported = false;
-        // SAFETY: the codegen typed the by-value enum param as the 8-byte opaque
-        // `ExternalMemoryHandleTypeHandle`; the true C ABI is a 4-byte i32 enum. Reinterpret
-        // the fn pointer to the correct `(importer, i32, &mut bool)` signature — it is the
-        // same C function underneath.
-        let f: unsafe extern "C" fn(
-            *const sys::ExternalResourceImporterHandle,
-            i32,
-            *mut bool,
-        ) -> sys::StatusPtr =
-            unsafe { std::mem::transmute(ia_fn(ia()?.CanImportMemory, "CanImportMemory")?) };
+        let f = ia_fn(ia()?.CanImportMemory, "CanImportMemory")?;
         check(unsafe { f(self.ptr, handle_type as i32, &mut supported) })?;
         Ok(supported)
     }
@@ -292,13 +275,7 @@ impl ExternalResourceImporter {
     /// Whether the importer can import `semaphore_type` semaphores.
     pub fn can_import_semaphore(&self, semaphore_type: ExternalSemaphoreType) -> Result<bool> {
         let mut supported = false;
-        // SAFETY: same enum-by-value ABI caveat as `can_import_memory` above.
-        let f: unsafe extern "C" fn(
-            *const sys::ExternalResourceImporterHandle,
-            i32,
-            *mut bool,
-        ) -> sys::StatusPtr =
-            unsafe { std::mem::transmute(ia_fn(ia()?.CanImportSemaphore, "CanImportSemaphore")?) };
+        let f = ia_fn(ia()?.CanImportSemaphore, "CanImportSemaphore")?;
         check(unsafe { f(self.ptr, semaphore_type as i32, &mut supported) })?;
         Ok(supported)
     }

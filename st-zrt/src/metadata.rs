@@ -2,8 +2,8 @@
 //! version, custom metadata map). Obtained from a session via `SessionGetModelMetadata`
 //! (idx 111, owning handle) and released on drop (`ReleaseModelMetadata`, idx 118).
 use crate::allocator::Allocator;
-use crate::{api, check, sys, Result};
-use std::ffi::{c_char, c_void, CString};
+use crate::{Result, api, check, sys};
+use std::ffi::{CString, c_char, c_void};
 use std::ptr;
 
 pub struct ModelMetadata {

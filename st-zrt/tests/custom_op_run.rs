@@ -9,8 +9,8 @@
 //!
 //! Fixture: `fixtures/custom_relu.onnx` (regenerate with `fixtures/gen_custom_relu.py`).
 use st_zrt::{
-    custom_op, CustomOp, CustomOpDomain, Environment, KernelContext, KernelInfo, MemoryInfo,
-    OpIoSpec, OwnedValue, Session, SessionOptions, ShapeInferContext, Tensor,
+    CustomOp, CustomOpDomain, Environment, KernelContext, KernelInfo, MemoryInfo, OpIoSpec,
+    OwnedValue, Session, SessionOptions, ShapeInferContext, Tensor, custom_op,
 };
 
 /// `com.example::MyRelu`: float in, relu'd float out.

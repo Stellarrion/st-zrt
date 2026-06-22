@@ -76,8 +76,10 @@ mod tests {
         // An unknown (future-ORT) code does not map.
         assert_eq!(Error::new(999, "future").ort_code(), None);
         // Display names a known ORT code.
-        assert!(Error::new(2, "bad arg")
-            .to_string()
-            .contains("InvalidArgument"));
+        assert!(
+            Error::new(2, "bad arg")
+                .to_string()
+                .contains("InvalidArgument")
+        );
     }
 }

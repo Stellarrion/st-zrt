@@ -3,8 +3,8 @@ use st_zrt::{
     Session, SessionOptions, StaticIoRuntime, Tensor, TensorBuffer,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 struct CountingAlloc;

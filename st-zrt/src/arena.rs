@@ -2,7 +2,7 @@
 //! sizes). Built via `CreateArenaCfg` (idx 156) or the newer key/value `CreateArenaCfgV2`
 //! (idx 164); released on drop (`ReleaseArenaCfg`, idx 157). Consumed by
 //! [`crate::Environment::register_allocator`].
-use crate::{api, check, sys, Error, Result};
+use crate::{Error, Result, api, check, sys};
 use std::ffi::CString;
 use std::ptr;
 

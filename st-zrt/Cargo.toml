@@ -1,6 +1,6 @@
 [package]
 name = "st-zrt"
-version = "0.1.1"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,7 +17,7 @@ categories = ["api-bindings", "science"]
 workspace = true
 
 [dependencies]
-st-zrt-sys = { path = "../st-zrt-sys", version = "1.26.0" }
+st-zrt-sys = { path = "../st-zrt-sys", version = "1.27.0" }
 futures-util = { version = "0.3", default-features = false }
 half = { version = "2", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
@@ -38,8 +38,8 @@ ep = ["st-zrt-sys/ep"]
 custom-ops = ["st-zrt-sys/custom-ops"]
 model-editor = ["st-zrt-sys/model-editor"]
 training = ["st-zrt-sys/training"]
-# Strict CUDA runtime build: GPU libonnxruntime + CUDA 12 runtime libs (auto-downloaded,
-# SHA-pinned), linked + rpath'd by build.rs. Implies `ep`.
+# GPU build: links the ORT GPU libonnxruntime (CUDA 13) + a system CUDA 13 toolkit via build.rs.
+# Implies `ep`.
 cuda = ["st-zrt-sys/cuda", "ep"]
 
 [package.metadata.docs.rs]

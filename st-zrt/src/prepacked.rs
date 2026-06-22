@@ -1,5 +1,5 @@
 //! Prepacked-weight cache shared across ORT sessions.
-use crate::{api, check, sys, Result};
+use crate::{Result, api, check, sys};
 use std::sync::Arc;
 
 pub(crate) struct PrepackedWeightsInner {

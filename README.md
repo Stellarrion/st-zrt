@@ -24,13 +24,14 @@ primitives to wire inference without wrapper overhead.
 - **Configurable output memory**: caller-owned buffers, ORT-allocator-owned outputs, aligned and
   prefaulted lane buffers, hugepage hints, optional `mlock`, CPU or device outputs.
 - **Broad ONNX data surface**: numeric tensors, strings, sparse tensors, sequence/map reads,
-  metadata, IoBinding, owned initializers, mmap-backed dense weights.
+  metadata, IoBinding, owned initializers, mmap-backed dense weights, and raw-byte access for
+  packed sub-byte tensor storage.
 - **Advanced ORT surfaces**: custom ops, provider config/discovery, CUDA builds, async runs,
   prepacked weights, profiling, threading, session logging, graph/model editing, AOT compile, and
   interop wrappers.
 - **Provider-aware serving controls**: IoBinding synchronization and opt-in per-run input rebinding
   for reusable CUDA/TensorRT lanes that need stricter input freshness.
-- **Generated FFI**: `st-zrt-sys` mirrors ONNX Runtime 1.26.0 with a zrt-namespaced raw table and no
+- **Generated FFI**: `st-zrt-sys` mirrors ONNX Runtime 1.27.0 with a zrt-namespaced raw table and no
   `bindgen`.
 
 ## Measured Integration Result
@@ -53,23 +54,23 @@ provides the kernels and graph execution.
 
 ```toml
 [dependencies]
-st-zrt = "0.1.1"
+st-zrt = "0.2.0"
 ```
 
 The default feature set covers CPU inference. Optional surfaces are explicit:
 
 ```toml
 # Execution-provider option builders and EP device discovery.
-st-zrt = { version = "0.1.1", features = ["ep"] }
+st-zrt = { version = "0.2.0", features = ["ep"] }
 
 # CUDA ONNX Runtime build and strict CUDA inference tests. Implies `ep`.
-st-zrt = { version = "0.1.1", features = ["cuda"] }
+st-zrt = { version = "0.2.0", features = ["cuda"] }
 
 # Safe Rust custom operator authoring.
-st-zrt = { version = "0.1.1", features = ["custom-ops"] }
+st-zrt = { version = "0.2.0", features = ["custom-ops"] }
 
 # Graph/model editing and AOT compile wrappers.
-st-zrt = { version = "0.1.1", features = ["model-editor"] }
+st-zrt = { version = "0.2.0", features = ["model-editor"] }
 ```
 
 On first build, `st-zrt-sys` downloads and SHA-256 verifies the matching ONNX Runtime archive. To
@@ -177,6 +178,17 @@ This is useful for execution-provider placement, graph optimization, and CUDA Me
 The `bert_cuda_probe` example is intentionally diagnostic: it compares normal `Session::run` with
 reusable static I/O on BERT-style text encoder ONNX graphs.
 
+## Packed Sub-Byte Tensors
+
+ONNX Runtime 1.27 can report newer packed metadata types such as `UINT4`, `INT4`,
+`FLOAT4E2M1`, `UINT2`, and `INT2`. These are not exposed through `as_slice::<T>()`, because one
+Rust scalar is not one logical tensor element. Use `as_bytes()` to inspect host-accessible packed
+storage, or `Tensor::from_packed_bytes` to wrap an already-packed caller buffer when ORT accepts
+that element type through `CreateTensorWithDataAsOrtValue`.
+
+Creation is intentionally fallible per ORT behavior: the runtime may report a packed metadata type
+but still reject constructing that type through the C value-creation API.
+
 ## Feature Matrix
 
 | Feature | Surface |
@@ -185,14 +197,15 @@ reusable static I/O on BERT-style text encoder ONNX graphs.
 | `half` | `f16` and `bf16` tensor element types |
 | `serde` | `SessionOptions` and execution-provider config serialization |
 | `ep` | CUDA, TensorRT, ROCm, CANN, DNNL, OpenVINO, VitisAI, MIGraphX option builders plus EP device discovery |
-| `cuda` | GPU ONNX Runtime build with CUDA 12 runtime libraries; implies `ep` |
+| `cuda` | GPU ONNX Runtime build (CUDA 13); links a system CUDA 13 toolkit; implies `ep` |
 | `custom-ops` | Safe Rust custom operator registration and kernel callbacks |
 | `model-editor` | Graph/model editing, attributed nodes, model serialization, AOT compile, EP registry gateway, external-memory interop |
 | `training` | Reserved for ONNX Runtime training packages |
 
-CUDA is currently Linux x86_64 focused. The `cuda` feature downloads the GPU ORT package and CUDA
-12 runtime libraries. cuDNN 9 must be available on the host. Override CUDA runtime discovery with
-`ST_ZRT_CUDA12_PATH`.
+CUDA is currently Linux x86_64 focused. The `cuda` feature downloads the GPU ORT package and links
+a system CUDA 13.x toolkit (the `nvidia-*-cu13` wheels are not yet on PyPI). The CUDA 13 runtime
+libs are resolved from `ST_ZRT_CUDA13_PATH` → `CUDA_PATH` → `/opt/cuda`, and cuDNN 9 must also be
+present on the host.
 
 ## Platform Support
 
@@ -201,10 +214,10 @@ CUDA is currently Linux x86_64 focused. The `cuda` feature downloads the GPU ORT
 | Linux x86_64 | reference platform |
 | Linux aarch64 | build-supported with SHA-pinned ORT archive |
 | macOS arm64 | build-supported with SHA-pinned ORT archive |
-| Windows x64 | build-supported; `onnxruntime.dll` must be on `PATH` at runtime |
-| macOS x86_64 | not supported by the ORT 1.26.0 release archive set |
+| Windows x64 | GPU archives only in ORT 1.27; CPU build via `ST_ZRT_ORT_PATH` or the NuGet package |
+| macOS x86_64 | not supported by the ORT 1.27.0 release archive set |
 
-MSRV: Rust **1.85**.
+MSRV: Rust **1.85** (edition 2024).
 
 ## Crates
 
@@ -227,7 +240,7 @@ cargo check -p st-zrt --all-features
 Release checks are tag-bound:
 
 ```bash
-git tag -a st-zrt-v0.1.1 -m "st-zrt v0.1.1"
+git tag -a st-zrt-v0.2.0 -m "st-zrt v0.2.0"
 scripts/release-check.sh pre-sys-publish
 ```
 

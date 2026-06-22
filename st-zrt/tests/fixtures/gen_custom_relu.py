@@ -43,8 +43,8 @@ model = helper.make_model(
         helper.make_opsetid(DOMAIN, 1),  # the custom domain our op lives in
     ],
 )
-# Down-pin the IR version so ORT 1.26 accepts the model regardless of the
-# onnx-Python default (onnx 1.20 emits a newer IR version).
+# Down-pin the IR version so the checked-in fixture stays loadable across the
+# ORT versions ZRT supports, regardless of the onnx-Python default.
 model.ir_version = 10
 
 out = os.path.join(os.path.dirname(__file__), "custom_relu.onnx")

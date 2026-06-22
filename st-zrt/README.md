@@ -1,11 +1,12 @@
 # st-zrt
 
-Safe, zero-overhead Rust runtime bindings for ONNX Runtime 1.26.
+Safe, zero-overhead Rust runtime bindings for ONNX Runtime 1.27.
 
 `st-zrt` keeps ONNX Runtime as the kernel engine and focuses on the Rust boundary: zero-copy caller
 buffers, prepared fixed-shape I/O, explicit lane-based serving, sparse tensors, IoBinding,
 profiling, threading options, async runs, custom ops, CUDA/provider configuration, mmap-backed
-dense initializers, session logging, and model-editor access behind feature gates.
+dense initializers, packed sub-byte raw byte access, session logging, and model-editor access
+behind feature gates.
 
 ```rust
 use st_zrt::{
@@ -57,5 +58,9 @@ callers that mutate reusable CPU input buffers can opt into per-run input rebind
 `DynamicIoOptions::with_rebind_inputs_each_run(true)`.
 
 The raw generated FFI lives in `st-zrt-sys`.
+
+Packed 2-bit/4-bit tensors are byte-oriented in the safe API. `as_slice::<T>()` remains reserved
+for 1:1 Rust scalar element types; use `as_bytes()` or `Tensor::from_packed_bytes` for already
+packed storage, subject to ORT accepting that packed element type.
 
 License: `Apache-2.0`.

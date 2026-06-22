@@ -1,7 +1,7 @@
 //! Shape/type introspection: `TensorTypeAndShapeInfo` over the owning
 //! `GetTensorTypeAndShape` path (idx 65 — returns an OWNING handle, one release).
-use crate::{api, check, sys, Error, Result};
-use std::ffi::{c_char, CStr};
+use crate::{Error, Result, api, check, sys};
+use std::ffi::{CStr, c_char};
 use std::ptr;
 
 /// Owning wrapper over `OrtTensorTypeAndShapeInfo` obtained from a value via

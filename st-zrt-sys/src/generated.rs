@@ -11,7 +11,6 @@ opaque_handle!(ArenaCfgHandle);
 opaque_handle!(CANNProviderOptionsHandle);
 opaque_handle!(CUDAProviderOptionsHandle);
 opaque_handle!(CUDAProviderOptionsV2Handle);
-opaque_handle!(CompiledModelCompatibilityHandle);
 opaque_handle!(CustomOpDomainHandle);
 opaque_handle!(CustomOpHandle);
 opaque_handle!(DataTypeHandle);
@@ -25,15 +24,12 @@ opaque_handle!(EpDeviceHandle);
 opaque_handle!(EpFactoryHandle);
 opaque_handle!(EpGraphSupportInfoHandle);
 opaque_handle!(EpHandle);
-opaque_handle!(ExecutionProviderDevicePolicyHandle);
 opaque_handle!(ExternalInitializerInfoHandle);
 opaque_handle!(ExternalMemoryDescriptorHandle);
 opaque_handle!(ExternalMemoryHandleHandle);
-opaque_handle!(ExternalMemoryHandleTypeHandle);
 opaque_handle!(ExternalResourceImporterHandle);
 opaque_handle!(ExternalSemaphoreDescriptorHandle);
 opaque_handle!(ExternalSemaphoreHandleHandle);
-opaque_handle!(ExternalSemaphoreTypeHandle);
 opaque_handle!(ExternalTensorDescriptorHandle);
 opaque_handle!(GetInitializerLocationFuncHandle);
 opaque_handle!(GraphHandle);
@@ -54,7 +50,6 @@ opaque_handle!(LoraAdapterHandle);
 opaque_handle!(MIGraphXProviderOptionsHandle);
 opaque_handle!(MapTypeInfoHandle);
 opaque_handle!(MemoryDeviceHandle);
-opaque_handle!(MemoryInfoDeviceTypeHandle);
 opaque_handle!(MemoryInfoHandle);
 opaque_handle!(ModelCompilationOptionsHandle);
 opaque_handle!(ModelHandle);
@@ -133,7 +128,7 @@ pub type CreateStatusFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_status(&self) -> CreateStatusFn {
-        self.f(IDX_CREATE_STATUS)
+        unsafe { self.f(IDX_CREATE_STATUS) }
     }
 }
 
@@ -143,7 +138,7 @@ pub type GetErrorCodeFn = unsafe extern "C" fn(status: *const StatusHandle) -> c
 impl Api {
     #[inline]
     pub unsafe fn get_error_code(&self) -> GetErrorCodeFn {
-        self.f(IDX_GET_ERROR_CODE)
+        unsafe { self.f(IDX_GET_ERROR_CODE) }
     }
 }
 
@@ -154,7 +149,7 @@ pub type GetErrorMessageFn =
 impl Api {
     #[inline]
     pub unsafe fn get_error_message(&self) -> GetErrorMessageFn {
-        self.f(IDX_GET_ERROR_MESSAGE)
+        unsafe { self.f(IDX_GET_ERROR_MESSAGE) }
     }
 }
 
@@ -168,7 +163,7 @@ pub type CreateEnvFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_env(&self) -> CreateEnvFn {
-        self.f(IDX_CREATE_ENV)
+        unsafe { self.f(IDX_CREATE_ENV) }
     }
 }
 
@@ -184,7 +179,7 @@ pub type CreateEnvWithCustomLoggerFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_env_with_custom_logger(&self) -> CreateEnvWithCustomLoggerFn {
-        self.f(IDX_CREATE_ENV_WITH_CUSTOM_LOGGER)
+        unsafe { self.f(IDX_CREATE_ENV_WITH_CUSTOM_LOGGER) }
     }
 }
 
@@ -194,7 +189,7 @@ pub type EnableTelemetryEventsFn = unsafe extern "C" fn(env: *const EnvHandle) -
 impl Api {
     #[inline]
     pub unsafe fn enable_telemetry_events(&self) -> EnableTelemetryEventsFn {
-        self.f(IDX_ENABLE_TELEMETRY_EVENTS)
+        unsafe { self.f(IDX_ENABLE_TELEMETRY_EVENTS) }
     }
 }
 
@@ -204,7 +199,7 @@ pub type DisableTelemetryEventsFn = unsafe extern "C" fn(env: *const EnvHandle) 
 impl Api {
     #[inline]
     pub unsafe fn disable_telemetry_events(&self) -> DisableTelemetryEventsFn {
-        self.f(IDX_DISABLE_TELEMETRY_EVENTS)
+        unsafe { self.f(IDX_DISABLE_TELEMETRY_EVENTS) }
     }
 }
 
@@ -219,7 +214,7 @@ pub type CreateSessionFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_session(&self) -> CreateSessionFn {
-        self.f(IDX_CREATE_SESSION)
+        unsafe { self.f(IDX_CREATE_SESSION) }
     }
 }
 
@@ -235,7 +230,7 @@ pub type CreateSessionFromArrayFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_session_from_array(&self) -> CreateSessionFromArrayFn {
-        self.f(IDX_CREATE_SESSION_FROM_ARRAY)
+        unsafe { self.f(IDX_CREATE_SESSION_FROM_ARRAY) }
     }
 }
 
@@ -254,7 +249,7 @@ pub type RunFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run(&self) -> RunFn {
-        self.f(IDX_RUN)
+        unsafe { self.f(IDX_RUN) }
     }
 }
 
@@ -265,7 +260,7 @@ pub type CreateSessionOptionsFn =
 impl Api {
     #[inline]
     pub unsafe fn create_session_options(&self) -> CreateSessionOptionsFn {
-        self.f(IDX_CREATE_SESSION_OPTIONS)
+        unsafe { self.f(IDX_CREATE_SESSION_OPTIONS) }
     }
 }
 
@@ -278,7 +273,7 @@ pub type SetOptimizedModelFilePathFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_optimized_model_file_path(&self) -> SetOptimizedModelFilePathFn {
-        self.f(IDX_SET_OPTIMIZED_MODEL_FILE_PATH)
+        unsafe { self.f(IDX_SET_OPTIMIZED_MODEL_FILE_PATH) }
     }
 }
 
@@ -291,7 +286,7 @@ pub type CloneSessionOptionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn clone_session_options(&self) -> CloneSessionOptionsFn {
-        self.f(IDX_CLONE_SESSION_OPTIONS)
+        unsafe { self.f(IDX_CLONE_SESSION_OPTIONS) }
     }
 }
 
@@ -304,7 +299,7 @@ pub type SetSessionExecutionModeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_session_execution_mode(&self) -> SetSessionExecutionModeFn {
-        self.f(IDX_SET_SESSION_EXECUTION_MODE)
+        unsafe { self.f(IDX_SET_SESSION_EXECUTION_MODE) }
     }
 }
 
@@ -317,7 +312,7 @@ pub type EnableProfilingFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn enable_profiling(&self) -> EnableProfilingFn {
-        self.f(IDX_ENABLE_PROFILING)
+        unsafe { self.f(IDX_ENABLE_PROFILING) }
     }
 }
 
@@ -327,7 +322,7 @@ pub type DisableProfilingFn = unsafe extern "C" fn(options: *mut SessionOptionsH
 impl Api {
     #[inline]
     pub unsafe fn disable_profiling(&self) -> DisableProfilingFn {
-        self.f(IDX_DISABLE_PROFILING)
+        unsafe { self.f(IDX_DISABLE_PROFILING) }
     }
 }
 
@@ -337,7 +332,7 @@ pub type EnableMemPatternFn = unsafe extern "C" fn(options: *mut SessionOptionsH
 impl Api {
     #[inline]
     pub unsafe fn enable_mem_pattern(&self) -> EnableMemPatternFn {
-        self.f(IDX_ENABLE_MEM_PATTERN)
+        unsafe { self.f(IDX_ENABLE_MEM_PATTERN) }
     }
 }
 
@@ -348,7 +343,7 @@ pub type DisableMemPatternFn =
 impl Api {
     #[inline]
     pub unsafe fn disable_mem_pattern(&self) -> DisableMemPatternFn {
-        self.f(IDX_DISABLE_MEM_PATTERN)
+        unsafe { self.f(IDX_DISABLE_MEM_PATTERN) }
     }
 }
 
@@ -359,7 +354,7 @@ pub type EnableCpuMemArenaFn =
 impl Api {
     #[inline]
     pub unsafe fn enable_cpu_mem_arena(&self) -> EnableCpuMemArenaFn {
-        self.f(IDX_ENABLE_CPU_MEM_ARENA)
+        unsafe { self.f(IDX_ENABLE_CPU_MEM_ARENA) }
     }
 }
 
@@ -370,7 +365,7 @@ pub type DisableCpuMemArenaFn =
 impl Api {
     #[inline]
     pub unsafe fn disable_cpu_mem_arena(&self) -> DisableCpuMemArenaFn {
-        self.f(IDX_DISABLE_CPU_MEM_ARENA)
+        unsafe { self.f(IDX_DISABLE_CPU_MEM_ARENA) }
     }
 }
 
@@ -383,7 +378,7 @@ pub type SetSessionLogIdFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_session_log_id(&self) -> SetSessionLogIdFn {
-        self.f(IDX_SET_SESSION_LOG_ID)
+        unsafe { self.f(IDX_SET_SESSION_LOG_ID) }
     }
 }
 
@@ -396,7 +391,7 @@ pub type SetSessionLogVerbosityLevelFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_session_log_verbosity_level(&self) -> SetSessionLogVerbosityLevelFn {
-        self.f(IDX_SET_SESSION_LOG_VERBOSITY_LEVEL)
+        unsafe { self.f(IDX_SET_SESSION_LOG_VERBOSITY_LEVEL) }
     }
 }
 
@@ -409,7 +404,7 @@ pub type SetSessionLogSeverityLevelFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_session_log_severity_level(&self) -> SetSessionLogSeverityLevelFn {
-        self.f(IDX_SET_SESSION_LOG_SEVERITY_LEVEL)
+        unsafe { self.f(IDX_SET_SESSION_LOG_SEVERITY_LEVEL) }
     }
 }
 
@@ -424,7 +419,7 @@ impl Api {
     pub unsafe fn set_session_graph_optimization_level(
         &self,
     ) -> SetSessionGraphOptimizationLevelFn {
-        self.f(IDX_SET_SESSION_GRAPH_OPTIMIZATION_LEVEL)
+        unsafe { self.f(IDX_SET_SESSION_GRAPH_OPTIMIZATION_LEVEL) }
     }
 }
 
@@ -437,7 +432,7 @@ pub type SetIntraOpNumThreadsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_intra_op_num_threads(&self) -> SetIntraOpNumThreadsFn {
-        self.f(IDX_SET_INTRA_OP_NUM_THREADS)
+        unsafe { self.f(IDX_SET_INTRA_OP_NUM_THREADS) }
     }
 }
 
@@ -450,7 +445,7 @@ pub type SetInterOpNumThreadsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_inter_op_num_threads(&self) -> SetInterOpNumThreadsFn {
-        self.f(IDX_SET_INTER_OP_NUM_THREADS)
+        unsafe { self.f(IDX_SET_INTER_OP_NUM_THREADS) }
     }
 }
 
@@ -463,7 +458,7 @@ pub type CreateCustomOpDomainFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_custom_op_domain(&self) -> CreateCustomOpDomainFn {
-        self.f(IDX_CREATE_CUSTOM_OP_DOMAIN)
+        unsafe { self.f(IDX_CREATE_CUSTOM_OP_DOMAIN) }
     }
 }
 
@@ -476,7 +471,7 @@ pub type AddCustomOpDomainFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_custom_op_domain(&self) -> AddCustomOpDomainFn {
-        self.f(IDX_ADD_CUSTOM_OP_DOMAIN)
+        unsafe { self.f(IDX_ADD_CUSTOM_OP_DOMAIN) }
     }
 }
 
@@ -490,7 +485,7 @@ pub type RegisterCustomOpsLibraryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn register_custom_ops_library(&self) -> RegisterCustomOpsLibraryFn {
-        self.f(IDX_REGISTER_CUSTOM_OPS_LIBRARY)
+        unsafe { self.f(IDX_REGISTER_CUSTOM_OPS_LIBRARY) }
     }
 }
 
@@ -501,7 +496,7 @@ pub type SessionGetInputCountFn =
 impl Api {
     #[inline]
     pub unsafe fn session_get_input_count(&self) -> SessionGetInputCountFn {
-        self.f(IDX_SESSION_GET_INPUT_COUNT)
+        unsafe { self.f(IDX_SESSION_GET_INPUT_COUNT) }
     }
 }
 
@@ -512,7 +507,7 @@ pub type SessionGetOutputCountFn =
 impl Api {
     #[inline]
     pub unsafe fn session_get_output_count(&self) -> SessionGetOutputCountFn {
-        self.f(IDX_SESSION_GET_OUTPUT_COUNT)
+        unsafe { self.f(IDX_SESSION_GET_OUTPUT_COUNT) }
     }
 }
 
@@ -525,7 +520,7 @@ impl Api {
     pub unsafe fn session_get_overridable_initializer_count(
         &self,
     ) -> SessionGetOverridableInitializerCountFn {
-        self.f(IDX_SESSION_GET_OVERRIDABLE_INITIALIZER_COUNT)
+        unsafe { self.f(IDX_SESSION_GET_OVERRIDABLE_INITIALIZER_COUNT) }
     }
 }
 
@@ -539,7 +534,7 @@ pub type SessionGetInputTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_input_type_info(&self) -> SessionGetInputTypeInfoFn {
-        self.f(IDX_SESSION_GET_INPUT_TYPE_INFO)
+        unsafe { self.f(IDX_SESSION_GET_INPUT_TYPE_INFO) }
     }
 }
 
@@ -553,7 +548,7 @@ pub type SessionGetOutputTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_output_type_info(&self) -> SessionGetOutputTypeInfoFn {
-        self.f(IDX_SESSION_GET_OUTPUT_TYPE_INFO)
+        unsafe { self.f(IDX_SESSION_GET_OUTPUT_TYPE_INFO) }
     }
 }
 
@@ -569,7 +564,7 @@ impl Api {
     pub unsafe fn session_get_overridable_initializer_type_info(
         &self,
     ) -> SessionGetOverridableInitializerTypeInfoFn {
-        self.f(IDX_SESSION_GET_OVERRIDABLE_INITIALIZER_TYPE_INFO)
+        unsafe { self.f(IDX_SESSION_GET_OVERRIDABLE_INITIALIZER_TYPE_INFO) }
     }
 }
 
@@ -584,7 +579,7 @@ pub type SessionGetInputNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_input_name(&self) -> SessionGetInputNameFn {
-        self.f(IDX_SESSION_GET_INPUT_NAME)
+        unsafe { self.f(IDX_SESSION_GET_INPUT_NAME) }
     }
 }
 
@@ -599,7 +594,7 @@ pub type SessionGetOutputNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_output_name(&self) -> SessionGetOutputNameFn {
-        self.f(IDX_SESSION_GET_OUTPUT_NAME)
+        unsafe { self.f(IDX_SESSION_GET_OUTPUT_NAME) }
     }
 }
 
@@ -616,7 +611,7 @@ impl Api {
     pub unsafe fn session_get_overridable_initializer_name(
         &self,
     ) -> SessionGetOverridableInitializerNameFn {
-        self.f(IDX_SESSION_GET_OVERRIDABLE_INITIALIZER_NAME)
+        unsafe { self.f(IDX_SESSION_GET_OVERRIDABLE_INITIALIZER_NAME) }
     }
 }
 
@@ -626,7 +621,7 @@ pub type CreateRunOptionsFn = unsafe extern "C" fn(out_: *mut *mut RunOptionsHan
 impl Api {
     #[inline]
     pub unsafe fn create_run_options(&self) -> CreateRunOptionsFn {
-        self.f(IDX_CREATE_RUN_OPTIONS)
+        unsafe { self.f(IDX_CREATE_RUN_OPTIONS) }
     }
 }
 
@@ -641,7 +636,7 @@ impl Api {
     pub unsafe fn run_options_set_run_log_verbosity_level(
         &self,
     ) -> RunOptionsSetRunLogVerbosityLevelFn {
-        self.f(IDX_RUN_OPTIONS_SET_RUN_LOG_VERBOSITY_LEVEL)
+        unsafe { self.f(IDX_RUN_OPTIONS_SET_RUN_LOG_VERBOSITY_LEVEL) }
     }
 }
 
@@ -656,7 +651,7 @@ impl Api {
     pub unsafe fn run_options_set_run_log_severity_level(
         &self,
     ) -> RunOptionsSetRunLogSeverityLevelFn {
-        self.f(IDX_RUN_OPTIONS_SET_RUN_LOG_SEVERITY_LEVEL)
+        unsafe { self.f(IDX_RUN_OPTIONS_SET_RUN_LOG_SEVERITY_LEVEL) }
     }
 }
 
@@ -669,7 +664,7 @@ pub type RunOptionsSetRunTagFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run_options_set_run_tag(&self) -> RunOptionsSetRunTagFn {
-        self.f(IDX_RUN_OPTIONS_SET_RUN_TAG)
+        unsafe { self.f(IDX_RUN_OPTIONS_SET_RUN_TAG) }
     }
 }
 
@@ -684,7 +679,7 @@ impl Api {
     pub unsafe fn run_options_get_run_log_verbosity_level(
         &self,
     ) -> RunOptionsGetRunLogVerbosityLevelFn {
-        self.f(IDX_RUN_OPTIONS_GET_RUN_LOG_VERBOSITY_LEVEL)
+        unsafe { self.f(IDX_RUN_OPTIONS_GET_RUN_LOG_VERBOSITY_LEVEL) }
     }
 }
 
@@ -699,7 +694,7 @@ impl Api {
     pub unsafe fn run_options_get_run_log_severity_level(
         &self,
     ) -> RunOptionsGetRunLogSeverityLevelFn {
-        self.f(IDX_RUN_OPTIONS_GET_RUN_LOG_SEVERITY_LEVEL)
+        unsafe { self.f(IDX_RUN_OPTIONS_GET_RUN_LOG_SEVERITY_LEVEL) }
     }
 }
 
@@ -712,7 +707,7 @@ pub type RunOptionsGetRunTagFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run_options_get_run_tag(&self) -> RunOptionsGetRunTagFn {
-        self.f(IDX_RUN_OPTIONS_GET_RUN_TAG)
+        unsafe { self.f(IDX_RUN_OPTIONS_GET_RUN_TAG) }
     }
 }
 
@@ -723,7 +718,7 @@ pub type RunOptionsSetTerminateFn =
 impl Api {
     #[inline]
     pub unsafe fn run_options_set_terminate(&self) -> RunOptionsSetTerminateFn {
-        self.f(IDX_RUN_OPTIONS_SET_TERMINATE)
+        unsafe { self.f(IDX_RUN_OPTIONS_SET_TERMINATE) }
     }
 }
 
@@ -734,7 +729,7 @@ pub type RunOptionsUnsetTerminateFn =
 impl Api {
     #[inline]
     pub unsafe fn run_options_unset_terminate(&self) -> RunOptionsUnsetTerminateFn {
-        self.f(IDX_RUN_OPTIONS_UNSET_TERMINATE)
+        unsafe { self.f(IDX_RUN_OPTIONS_UNSET_TERMINATE) }
     }
 }
 
@@ -750,7 +745,7 @@ pub type CreateTensorAsOrtValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_tensor_as_ort_value(&self) -> CreateTensorAsOrtValueFn {
-        self.f(IDX_CREATE_TENSOR_AS_ORT_VALUE)
+        unsafe { self.f(IDX_CREATE_TENSOR_AS_ORT_VALUE) }
     }
 }
 
@@ -768,7 +763,7 @@ pub type CreateTensorWithDataAsOrtValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_tensor_with_data_as_ort_value(&self) -> CreateTensorWithDataAsOrtValueFn {
-        self.f(IDX_CREATE_TENSOR_WITH_DATA_AS_ORT_VALUE)
+        unsafe { self.f(IDX_CREATE_TENSOR_WITH_DATA_AS_ORT_VALUE) }
     }
 }
 
@@ -779,7 +774,7 @@ pub type IsTensorFn =
 impl Api {
     #[inline]
     pub unsafe fn is_tensor(&self) -> IsTensorFn {
-        self.f(IDX_IS_TENSOR)
+        unsafe { self.f(IDX_IS_TENSOR) }
     }
 }
 
@@ -790,7 +785,7 @@ pub type GetTensorMutableDataFn =
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_mutable_data(&self) -> GetTensorMutableDataFn {
-        self.f(IDX_GET_TENSOR_MUTABLE_DATA)
+        unsafe { self.f(IDX_GET_TENSOR_MUTABLE_DATA) }
     }
 }
 
@@ -804,7 +799,7 @@ pub type FillStringTensorFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn fill_string_tensor(&self) -> FillStringTensorFn {
-        self.f(IDX_FILL_STRING_TENSOR)
+        unsafe { self.f(IDX_FILL_STRING_TENSOR) }
     }
 }
 
@@ -815,7 +810,7 @@ pub type GetStringTensorDataLengthFn =
 impl Api {
     #[inline]
     pub unsafe fn get_string_tensor_data_length(&self) -> GetStringTensorDataLengthFn {
-        self.f(IDX_GET_STRING_TENSOR_DATA_LENGTH)
+        unsafe { self.f(IDX_GET_STRING_TENSOR_DATA_LENGTH) }
     }
 }
 
@@ -831,7 +826,7 @@ pub type GetStringTensorContentFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_string_tensor_content(&self) -> GetStringTensorContentFn {
-        self.f(IDX_GET_STRING_TENSOR_CONTENT)
+        unsafe { self.f(IDX_GET_STRING_TENSOR_CONTENT) }
     }
 }
 
@@ -844,7 +839,7 @@ pub type CastTypeInfoToTensorInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn cast_type_info_to_tensor_info(&self) -> CastTypeInfoToTensorInfoFn {
-        self.f(IDX_CAST_TYPE_INFO_TO_TENSOR_INFO)
+        unsafe { self.f(IDX_CAST_TYPE_INFO_TO_TENSOR_INFO) }
     }
 }
 
@@ -855,7 +850,7 @@ pub type GetOnnxTypeFromTypeInfoFn =
 impl Api {
     #[inline]
     pub unsafe fn get_onnx_type_from_type_info(&self) -> GetOnnxTypeFromTypeInfoFn {
-        self.f(IDX_GET_ONNX_TYPE_FROM_TYPE_INFO)
+        unsafe { self.f(IDX_GET_ONNX_TYPE_FROM_TYPE_INFO) }
     }
 }
 
@@ -866,7 +861,7 @@ pub type CreateTensorTypeAndShapeInfoFn =
 impl Api {
     #[inline]
     pub unsafe fn create_tensor_type_and_shape_info(&self) -> CreateTensorTypeAndShapeInfoFn {
-        self.f(IDX_CREATE_TENSOR_TYPE_AND_SHAPE_INFO)
+        unsafe { self.f(IDX_CREATE_TENSOR_TYPE_AND_SHAPE_INFO) }
     }
 }
 
@@ -877,7 +872,7 @@ pub type SetTensorElementTypeFn =
 impl Api {
     #[inline]
     pub unsafe fn set_tensor_element_type(&self) -> SetTensorElementTypeFn {
-        self.f(IDX_SET_TENSOR_ELEMENT_TYPE)
+        unsafe { self.f(IDX_SET_TENSOR_ELEMENT_TYPE) }
     }
 }
 
@@ -891,7 +886,7 @@ pub type SetDimensionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_dimensions(&self) -> SetDimensionsFn {
-        self.f(IDX_SET_DIMENSIONS)
+        unsafe { self.f(IDX_SET_DIMENSIONS) }
     }
 }
 
@@ -904,7 +899,7 @@ pub type GetTensorElementTypeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_element_type(&self) -> GetTensorElementTypeFn {
-        self.f(IDX_GET_TENSOR_ELEMENT_TYPE)
+        unsafe { self.f(IDX_GET_TENSOR_ELEMENT_TYPE) }
     }
 }
 
@@ -915,7 +910,7 @@ pub type GetDimensionsCountFn =
 impl Api {
     #[inline]
     pub unsafe fn get_dimensions_count(&self) -> GetDimensionsCountFn {
-        self.f(IDX_GET_DIMENSIONS_COUNT)
+        unsafe { self.f(IDX_GET_DIMENSIONS_COUNT) }
     }
 }
 
@@ -929,7 +924,7 @@ pub type GetDimensionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_dimensions(&self) -> GetDimensionsFn {
-        self.f(IDX_GET_DIMENSIONS)
+        unsafe { self.f(IDX_GET_DIMENSIONS) }
     }
 }
 
@@ -943,7 +938,7 @@ pub type GetSymbolicDimensionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_symbolic_dimensions(&self) -> GetSymbolicDimensionsFn {
-        self.f(IDX_GET_SYMBOLIC_DIMENSIONS)
+        unsafe { self.f(IDX_GET_SYMBOLIC_DIMENSIONS) }
     }
 }
 
@@ -954,7 +949,7 @@ pub type GetTensorShapeElementCountFn =
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_shape_element_count(&self) -> GetTensorShapeElementCountFn {
-        self.f(IDX_GET_TENSOR_SHAPE_ELEMENT_COUNT)
+        unsafe { self.f(IDX_GET_TENSOR_SHAPE_ELEMENT_COUNT) }
     }
 }
 
@@ -967,7 +962,7 @@ pub type GetTensorTypeAndShapeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_type_and_shape(&self) -> GetTensorTypeAndShapeFn {
-        self.f(IDX_GET_TENSOR_TYPE_AND_SHAPE)
+        unsafe { self.f(IDX_GET_TENSOR_TYPE_AND_SHAPE) }
     }
 }
 
@@ -978,7 +973,7 @@ pub type GetTypeInfoFn =
 impl Api {
     #[inline]
     pub unsafe fn get_type_info(&self) -> GetTypeInfoFn {
-        self.f(IDX_GET_TYPE_INFO)
+        unsafe { self.f(IDX_GET_TYPE_INFO) }
     }
 }
 
@@ -989,7 +984,7 @@ pub type GetValueTypeFn =
 impl Api {
     #[inline]
     pub unsafe fn get_value_type(&self) -> GetValueTypeFn {
-        self.f(IDX_GET_VALUE_TYPE)
+        unsafe { self.f(IDX_GET_VALUE_TYPE) }
     }
 }
 
@@ -1005,7 +1000,7 @@ pub type CreateMemoryInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_memory_info(&self) -> CreateMemoryInfoFn {
-        self.f(IDX_CREATE_MEMORY_INFO)
+        unsafe { self.f(IDX_CREATE_MEMORY_INFO) }
     }
 }
 
@@ -1019,7 +1014,7 @@ pub type CreateCpuMemoryInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_cpu_memory_info(&self) -> CreateCpuMemoryInfoFn {
-        self.f(IDX_CREATE_CPU_MEMORY_INFO)
+        unsafe { self.f(IDX_CREATE_CPU_MEMORY_INFO) }
     }
 }
 
@@ -1033,7 +1028,7 @@ pub type CompareMemoryInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn compare_memory_info(&self) -> CompareMemoryInfoFn {
-        self.f(IDX_COMPARE_MEMORY_INFO)
+        unsafe { self.f(IDX_COMPARE_MEMORY_INFO) }
     }
 }
 
@@ -1046,7 +1041,7 @@ pub type MemoryInfoGetNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_name(&self) -> MemoryInfoGetNameFn {
-        self.f(IDX_MEMORY_INFO_GET_NAME)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_NAME) }
     }
 }
 
@@ -1057,7 +1052,7 @@ pub type MemoryInfoGetIdFn =
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_id(&self) -> MemoryInfoGetIdFn {
-        self.f(IDX_MEMORY_INFO_GET_ID)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_ID) }
     }
 }
 
@@ -1068,7 +1063,7 @@ pub type MemoryInfoGetMemTypeFn =
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_mem_type(&self) -> MemoryInfoGetMemTypeFn {
-        self.f(IDX_MEMORY_INFO_GET_MEM_TYPE)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_MEM_TYPE) }
     }
 }
 
@@ -1079,7 +1074,7 @@ pub type MemoryInfoGetTypeFn =
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_type(&self) -> MemoryInfoGetTypeFn {
-        self.f(IDX_MEMORY_INFO_GET_TYPE)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_TYPE) }
     }
 }
 
@@ -1093,7 +1088,7 @@ pub type AllocatorAllocFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn allocator_alloc(&self) -> AllocatorAllocFn {
-        self.f(IDX_ALLOCATOR_ALLOC)
+        unsafe { self.f(IDX_ALLOCATOR_ALLOC) }
     }
 }
 
@@ -1106,7 +1101,7 @@ pub type AllocatorFreeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn allocator_free(&self) -> AllocatorFreeFn {
-        self.f(IDX_ALLOCATOR_FREE)
+        unsafe { self.f(IDX_ALLOCATOR_FREE) }
     }
 }
 
@@ -1119,7 +1114,7 @@ pub type AllocatorGetInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn allocator_get_info(&self) -> AllocatorGetInfoFn {
-        self.f(IDX_ALLOCATOR_GET_INFO)
+        unsafe { self.f(IDX_ALLOCATOR_GET_INFO) }
     }
 }
 
@@ -1130,7 +1125,7 @@ pub type GetAllocatorWithDefaultOptionsFn =
 impl Api {
     #[inline]
     pub unsafe fn get_allocator_with_default_options(&self) -> GetAllocatorWithDefaultOptionsFn {
-        self.f(IDX_GET_ALLOCATOR_WITH_DEFAULT_OPTIONS)
+        unsafe { self.f(IDX_GET_ALLOCATOR_WITH_DEFAULT_OPTIONS) }
     }
 }
 
@@ -1144,7 +1139,7 @@ pub type AddFreeDimensionOverrideFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_free_dimension_override(&self) -> AddFreeDimensionOverrideFn {
-        self.f(IDX_ADD_FREE_DIMENSION_OVERRIDE)
+        unsafe { self.f(IDX_ADD_FREE_DIMENSION_OVERRIDE) }
     }
 }
 
@@ -1159,7 +1154,7 @@ pub type GetValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_value(&self) -> GetValueFn {
-        self.f(IDX_GET_VALUE)
+        unsafe { self.f(IDX_GET_VALUE) }
     }
 }
 
@@ -1170,7 +1165,7 @@ pub type GetValueCountFn =
 impl Api {
     #[inline]
     pub unsafe fn get_value_count(&self) -> GetValueCountFn {
-        self.f(IDX_GET_VALUE_COUNT)
+        unsafe { self.f(IDX_GET_VALUE_COUNT) }
     }
 }
 
@@ -1185,7 +1180,7 @@ pub type CreateValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_value(&self) -> CreateValueFn {
-        self.f(IDX_CREATE_VALUE)
+        unsafe { self.f(IDX_CREATE_VALUE) }
     }
 }
 
@@ -1201,7 +1196,7 @@ pub type CreateOpaqueValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_opaque_value(&self) -> CreateOpaqueValueFn {
-        self.f(IDX_CREATE_OPAQUE_VALUE)
+        unsafe { self.f(IDX_CREATE_OPAQUE_VALUE) }
     }
 }
 
@@ -1217,7 +1212,7 @@ pub type GetOpaqueValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_opaque_value(&self) -> GetOpaqueValueFn {
-        self.f(IDX_GET_OPAQUE_VALUE)
+        unsafe { self.f(IDX_GET_OPAQUE_VALUE) }
     }
 }
 
@@ -1227,7 +1222,7 @@ pub type ReleaseEnvFn = unsafe extern "C" fn(input: *mut EnvHandle) -> ();
 impl Api {
     #[inline]
     pub unsafe fn release_env(&self) -> ReleaseEnvFn {
-        self.f(IDX_RELEASE_ENV)
+        unsafe { self.f(IDX_RELEASE_ENV) }
     }
 }
 
@@ -1237,7 +1232,7 @@ pub type ReleaseStatusFn = unsafe extern "C" fn(input: *mut StatusHandle) -> ();
 impl Api {
     #[inline]
     pub unsafe fn release_status(&self) -> ReleaseStatusFn {
-        self.f(IDX_RELEASE_STATUS)
+        unsafe { self.f(IDX_RELEASE_STATUS) }
     }
 }
 
@@ -1247,7 +1242,7 @@ pub type ReleaseMemoryInfoFn = unsafe extern "C" fn(input: *mut MemoryInfoHandle
 impl Api {
     #[inline]
     pub unsafe fn release_memory_info(&self) -> ReleaseMemoryInfoFn {
-        self.f(IDX_RELEASE_MEMORY_INFO)
+        unsafe { self.f(IDX_RELEASE_MEMORY_INFO) }
     }
 }
 
@@ -1257,7 +1252,7 @@ pub type ReleaseSessionFn = unsafe extern "C" fn(input: *mut SessionHandle) -> (
 impl Api {
     #[inline]
     pub unsafe fn release_session(&self) -> ReleaseSessionFn {
-        self.f(IDX_RELEASE_SESSION)
+        unsafe { self.f(IDX_RELEASE_SESSION) }
     }
 }
 
@@ -1267,7 +1262,7 @@ pub type ReleaseValueFn = unsafe extern "C" fn(input: *mut ValueHandle) -> ();
 impl Api {
     #[inline]
     pub unsafe fn release_value(&self) -> ReleaseValueFn {
-        self.f(IDX_RELEASE_VALUE)
+        unsafe { self.f(IDX_RELEASE_VALUE) }
     }
 }
 
@@ -1277,7 +1272,7 @@ pub type ReleaseRunOptionsFn = unsafe extern "C" fn(input: *mut RunOptionsHandle
 impl Api {
     #[inline]
     pub unsafe fn release_run_options(&self) -> ReleaseRunOptionsFn {
-        self.f(IDX_RELEASE_RUN_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_RUN_OPTIONS) }
     }
 }
 
@@ -1287,7 +1282,7 @@ pub type ReleaseTypeInfoFn = unsafe extern "C" fn(input: *mut TypeInfoHandle) ->
 impl Api {
     #[inline]
     pub unsafe fn release_type_info(&self) -> ReleaseTypeInfoFn {
-        self.f(IDX_RELEASE_TYPE_INFO)
+        unsafe { self.f(IDX_RELEASE_TYPE_INFO) }
     }
 }
 
@@ -1298,7 +1293,7 @@ pub type ReleaseTensorTypeAndShapeInfoFn =
 impl Api {
     #[inline]
     pub unsafe fn release_tensor_type_and_shape_info(&self) -> ReleaseTensorTypeAndShapeInfoFn {
-        self.f(IDX_RELEASE_TENSOR_TYPE_AND_SHAPE_INFO)
+        unsafe { self.f(IDX_RELEASE_TENSOR_TYPE_AND_SHAPE_INFO) }
     }
 }
 
@@ -1308,7 +1303,7 @@ pub type ReleaseSessionOptionsFn = unsafe extern "C" fn(input: *mut SessionOptio
 impl Api {
     #[inline]
     pub unsafe fn release_session_options(&self) -> ReleaseSessionOptionsFn {
-        self.f(IDX_RELEASE_SESSION_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_SESSION_OPTIONS) }
     }
 }
 
@@ -1318,7 +1313,7 @@ pub type ReleaseCustomOpDomainFn = unsafe extern "C" fn(input: *mut CustomOpDoma
 impl Api {
     #[inline]
     pub unsafe fn release_custom_op_domain(&self) -> ReleaseCustomOpDomainFn {
-        self.f(IDX_RELEASE_CUSTOM_OP_DOMAIN)
+        unsafe { self.f(IDX_RELEASE_CUSTOM_OP_DOMAIN) }
     }
 }
 
@@ -1332,7 +1327,7 @@ pub type GetDenotationFromTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_denotation_from_type_info(&self) -> GetDenotationFromTypeInfoFn {
-        self.f(IDX_GET_DENOTATION_FROM_TYPE_INFO)
+        unsafe { self.f(IDX_GET_DENOTATION_FROM_TYPE_INFO) }
     }
 }
 
@@ -1345,7 +1340,7 @@ pub type CastTypeInfoToMapTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn cast_type_info_to_map_type_info(&self) -> CastTypeInfoToMapTypeInfoFn {
-        self.f(IDX_CAST_TYPE_INFO_TO_MAP_TYPE_INFO)
+        unsafe { self.f(IDX_CAST_TYPE_INFO_TO_MAP_TYPE_INFO) }
     }
 }
 
@@ -1358,7 +1353,7 @@ pub type CastTypeInfoToSequenceTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn cast_type_info_to_sequence_type_info(&self) -> CastTypeInfoToSequenceTypeInfoFn {
-        self.f(IDX_CAST_TYPE_INFO_TO_SEQUENCE_TYPE_INFO)
+        unsafe { self.f(IDX_CAST_TYPE_INFO_TO_SEQUENCE_TYPE_INFO) }
     }
 }
 
@@ -1371,7 +1366,7 @@ pub type GetMapKeyTypeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_map_key_type(&self) -> GetMapKeyTypeFn {
-        self.f(IDX_GET_MAP_KEY_TYPE)
+        unsafe { self.f(IDX_GET_MAP_KEY_TYPE) }
     }
 }
 
@@ -1384,7 +1379,7 @@ pub type GetMapValueTypeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_map_value_type(&self) -> GetMapValueTypeFn {
-        self.f(IDX_GET_MAP_VALUE_TYPE)
+        unsafe { self.f(IDX_GET_MAP_VALUE_TYPE) }
     }
 }
 
@@ -1397,7 +1392,7 @@ pub type GetSequenceElementTypeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_sequence_element_type(&self) -> GetSequenceElementTypeFn {
-        self.f(IDX_GET_SEQUENCE_ELEMENT_TYPE)
+        unsafe { self.f(IDX_GET_SEQUENCE_ELEMENT_TYPE) }
     }
 }
 
@@ -1407,7 +1402,7 @@ pub type ReleaseMapTypeInfoFn = unsafe extern "C" fn(input: *mut MapTypeInfoHand
 impl Api {
     #[inline]
     pub unsafe fn release_map_type_info(&self) -> ReleaseMapTypeInfoFn {
-        self.f(IDX_RELEASE_MAP_TYPE_INFO)
+        unsafe { self.f(IDX_RELEASE_MAP_TYPE_INFO) }
     }
 }
 
@@ -1417,7 +1412,7 @@ pub type ReleaseSequenceTypeInfoFn = unsafe extern "C" fn(input: *mut SequenceTy
 impl Api {
     #[inline]
     pub unsafe fn release_sequence_type_info(&self) -> ReleaseSequenceTypeInfoFn {
-        self.f(IDX_RELEASE_SEQUENCE_TYPE_INFO)
+        unsafe { self.f(IDX_RELEASE_SEQUENCE_TYPE_INFO) }
     }
 }
 
@@ -1431,7 +1426,7 @@ pub type SessionEndProfilingFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_end_profiling(&self) -> SessionEndProfilingFn {
-        self.f(IDX_SESSION_END_PROFILING)
+        unsafe { self.f(IDX_SESSION_END_PROFILING) }
     }
 }
 
@@ -1444,7 +1439,7 @@ pub type SessionGetModelMetadataFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_model_metadata(&self) -> SessionGetModelMetadataFn {
-        self.f(IDX_SESSION_GET_MODEL_METADATA)
+        unsafe { self.f(IDX_SESSION_GET_MODEL_METADATA) }
     }
 }
 
@@ -1458,7 +1453,7 @@ pub type ModelMetadataGetProducerNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn model_metadata_get_producer_name(&self) -> ModelMetadataGetProducerNameFn {
-        self.f(IDX_MODEL_METADATA_GET_PRODUCER_NAME)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_PRODUCER_NAME) }
     }
 }
 
@@ -1472,7 +1467,7 @@ pub type ModelMetadataGetGraphNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn model_metadata_get_graph_name(&self) -> ModelMetadataGetGraphNameFn {
-        self.f(IDX_MODEL_METADATA_GET_GRAPH_NAME)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_GRAPH_NAME) }
     }
 }
 
@@ -1486,7 +1481,7 @@ pub type ModelMetadataGetDomainFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn model_metadata_get_domain(&self) -> ModelMetadataGetDomainFn {
-        self.f(IDX_MODEL_METADATA_GET_DOMAIN)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_DOMAIN) }
     }
 }
 
@@ -1500,7 +1495,7 @@ pub type ModelMetadataGetDescriptionFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn model_metadata_get_description(&self) -> ModelMetadataGetDescriptionFn {
-        self.f(IDX_MODEL_METADATA_GET_DESCRIPTION)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_DESCRIPTION) }
     }
 }
 
@@ -1517,7 +1512,7 @@ impl Api {
     pub unsafe fn model_metadata_lookup_custom_metadata_map(
         &self,
     ) -> ModelMetadataLookupCustomMetadataMapFn {
-        self.f(IDX_MODEL_METADATA_LOOKUP_CUSTOM_METADATA_MAP)
+        unsafe { self.f(IDX_MODEL_METADATA_LOOKUP_CUSTOM_METADATA_MAP) }
     }
 }
 
@@ -1528,7 +1523,7 @@ pub type ModelMetadataGetVersionFn =
 impl Api {
     #[inline]
     pub unsafe fn model_metadata_get_version(&self) -> ModelMetadataGetVersionFn {
-        self.f(IDX_MODEL_METADATA_GET_VERSION)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_VERSION) }
     }
 }
 
@@ -1538,7 +1533,7 @@ pub type ReleaseModelMetadataFn = unsafe extern "C" fn(input: *mut ModelMetadata
 impl Api {
     #[inline]
     pub unsafe fn release_model_metadata(&self) -> ReleaseModelMetadataFn {
-        self.f(IDX_RELEASE_MODEL_METADATA)
+        unsafe { self.f(IDX_RELEASE_MODEL_METADATA) }
     }
 }
 
@@ -1553,7 +1548,7 @@ pub type CreateEnvWithGlobalThreadPoolsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_env_with_global_thread_pools(&self) -> CreateEnvWithGlobalThreadPoolsFn {
-        self.f(IDX_CREATE_ENV_WITH_GLOBAL_THREAD_POOLS)
+        unsafe { self.f(IDX_CREATE_ENV_WITH_GLOBAL_THREAD_POOLS) }
     }
 }
 
@@ -1564,7 +1559,7 @@ pub type DisablePerSessionThreadsFn =
 impl Api {
     #[inline]
     pub unsafe fn disable_per_session_threads(&self) -> DisablePerSessionThreadsFn {
-        self.f(IDX_DISABLE_PER_SESSION_THREADS)
+        unsafe { self.f(IDX_DISABLE_PER_SESSION_THREADS) }
     }
 }
 
@@ -1575,7 +1570,7 @@ pub type CreateThreadingOptionsFn =
 impl Api {
     #[inline]
     pub unsafe fn create_threading_options(&self) -> CreateThreadingOptionsFn {
-        self.f(IDX_CREATE_THREADING_OPTIONS)
+        unsafe { self.f(IDX_CREATE_THREADING_OPTIONS) }
     }
 }
 
@@ -1585,7 +1580,7 @@ pub type ReleaseThreadingOptionsFn = unsafe extern "C" fn(input: *mut ThreadingO
 impl Api {
     #[inline]
     pub unsafe fn release_threading_options(&self) -> ReleaseThreadingOptionsFn {
-        self.f(IDX_RELEASE_THREADING_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_THREADING_OPTIONS) }
     }
 }
 
@@ -1602,7 +1597,7 @@ impl Api {
     pub unsafe fn model_metadata_get_custom_metadata_map_keys(
         &self,
     ) -> ModelMetadataGetCustomMetadataMapKeysFn {
-        self.f(IDX_MODEL_METADATA_GET_CUSTOM_METADATA_MAP_KEYS)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_CUSTOM_METADATA_MAP_KEYS) }
     }
 }
 
@@ -1616,7 +1611,7 @@ pub type AddFreeDimensionOverrideByNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_free_dimension_override_by_name(&self) -> AddFreeDimensionOverrideByNameFn {
-        self.f(IDX_ADD_FREE_DIMENSION_OVERRIDE_BY_NAME)
+        unsafe { self.f(IDX_ADD_FREE_DIMENSION_OVERRIDE_BY_NAME) }
     }
 }
 
@@ -1629,7 +1624,7 @@ pub type GetAvailableProvidersFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_available_providers(&self) -> GetAvailableProvidersFn {
-        self.f(IDX_GET_AVAILABLE_PROVIDERS)
+        unsafe { self.f(IDX_GET_AVAILABLE_PROVIDERS) }
     }
 }
 
@@ -1642,7 +1637,7 @@ pub type ReleaseAvailableProvidersFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn release_available_providers(&self) -> ReleaseAvailableProvidersFn {
-        self.f(IDX_RELEASE_AVAILABLE_PROVIDERS)
+        unsafe { self.f(IDX_RELEASE_AVAILABLE_PROVIDERS) }
     }
 }
 
@@ -1653,7 +1648,7 @@ pub type GetStringTensorElementLengthFn =
 impl Api {
     #[inline]
     pub unsafe fn get_string_tensor_element_length(&self) -> GetStringTensorElementLengthFn {
-        self.f(IDX_GET_STRING_TENSOR_ELEMENT_LENGTH)
+        unsafe { self.f(IDX_GET_STRING_TENSOR_ELEMENT_LENGTH) }
     }
 }
 
@@ -1668,7 +1663,7 @@ pub type GetStringTensorElementFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_string_tensor_element(&self) -> GetStringTensorElementFn {
-        self.f(IDX_GET_STRING_TENSOR_ELEMENT)
+        unsafe { self.f(IDX_GET_STRING_TENSOR_ELEMENT) }
     }
 }
 
@@ -1682,7 +1677,7 @@ pub type FillStringTensorElementFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn fill_string_tensor_element(&self) -> FillStringTensorElementFn {
-        self.f(IDX_FILL_STRING_TENSOR_ELEMENT)
+        unsafe { self.f(IDX_FILL_STRING_TENSOR_ELEMENT) }
     }
 }
 
@@ -1696,7 +1691,7 @@ pub type AddSessionConfigEntryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_session_config_entry(&self) -> AddSessionConfigEntryFn {
-        self.f(IDX_ADD_SESSION_CONFIG_ENTRY)
+        unsafe { self.f(IDX_ADD_SESSION_CONFIG_ENTRY) }
     }
 }
 
@@ -1710,7 +1705,7 @@ pub type CreateAllocatorFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_allocator(&self) -> CreateAllocatorFn {
-        self.f(IDX_CREATE_ALLOCATOR)
+        unsafe { self.f(IDX_CREATE_ALLOCATOR) }
     }
 }
 
@@ -1720,7 +1715,7 @@ pub type ReleaseAllocatorFn = unsafe extern "C" fn(input: *mut AllocatorHandle) 
 impl Api {
     #[inline]
     pub unsafe fn release_allocator(&self) -> ReleaseAllocatorFn {
-        self.f(IDX_RELEASE_ALLOCATOR)
+        unsafe { self.f(IDX_RELEASE_ALLOCATOR) }
     }
 }
 
@@ -1734,7 +1729,7 @@ pub type RunWithBindingFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run_with_binding(&self) -> RunWithBindingFn {
-        self.f(IDX_RUN_WITH_BINDING)
+        unsafe { self.f(IDX_RUN_WITH_BINDING) }
     }
 }
 
@@ -1745,7 +1740,7 @@ pub type CreateIoBindingFn =
 impl Api {
     #[inline]
     pub unsafe fn create_io_binding(&self) -> CreateIoBindingFn {
-        self.f(IDX_CREATE_IO_BINDING)
+        unsafe { self.f(IDX_CREATE_IO_BINDING) }
     }
 }
 
@@ -1755,7 +1750,7 @@ pub type ReleaseIoBindingFn = unsafe extern "C" fn(input: *mut IoBindingHandle) 
 impl Api {
     #[inline]
     pub unsafe fn release_io_binding(&self) -> ReleaseIoBindingFn {
-        self.f(IDX_RELEASE_IO_BINDING)
+        unsafe { self.f(IDX_RELEASE_IO_BINDING) }
     }
 }
 
@@ -1769,7 +1764,7 @@ pub type BindInputFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn bind_input(&self) -> BindInputFn {
-        self.f(IDX_BIND_INPUT)
+        unsafe { self.f(IDX_BIND_INPUT) }
     }
 }
 
@@ -1783,7 +1778,7 @@ pub type BindOutputFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn bind_output(&self) -> BindOutputFn {
-        self.f(IDX_BIND_OUTPUT)
+        unsafe { self.f(IDX_BIND_OUTPUT) }
     }
 }
 
@@ -1797,7 +1792,7 @@ pub type BindOutputToDeviceFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn bind_output_to_device(&self) -> BindOutputToDeviceFn {
-        self.f(IDX_BIND_OUTPUT_TO_DEVICE)
+        unsafe { self.f(IDX_BIND_OUTPUT_TO_DEVICE) }
     }
 }
 
@@ -1813,7 +1808,7 @@ pub type GetBoundOutputNamesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_bound_output_names(&self) -> GetBoundOutputNamesFn {
-        self.f(IDX_GET_BOUND_OUTPUT_NAMES)
+        unsafe { self.f(IDX_GET_BOUND_OUTPUT_NAMES) }
     }
 }
 
@@ -1828,7 +1823,7 @@ pub type GetBoundOutputValuesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_bound_output_values(&self) -> GetBoundOutputValuesFn {
-        self.f(IDX_GET_BOUND_OUTPUT_VALUES)
+        unsafe { self.f(IDX_GET_BOUND_OUTPUT_VALUES) }
     }
 }
 
@@ -1838,7 +1833,7 @@ pub type ClearBoundInputsFn = unsafe extern "C" fn(binding_ptr: *mut IoBindingHa
 impl Api {
     #[inline]
     pub unsafe fn clear_bound_inputs(&self) -> ClearBoundInputsFn {
-        self.f(IDX_CLEAR_BOUND_INPUTS)
+        unsafe { self.f(IDX_CLEAR_BOUND_INPUTS) }
     }
 }
 
@@ -1848,7 +1843,7 @@ pub type ClearBoundOutputsFn = unsafe extern "C" fn(binding_ptr: *mut IoBindingH
 impl Api {
     #[inline]
     pub unsafe fn clear_bound_outputs(&self) -> ClearBoundOutputsFn {
-        self.f(IDX_CLEAR_BOUND_OUTPUTS)
+        unsafe { self.f(IDX_CLEAR_BOUND_OUTPUTS) }
     }
 }
 
@@ -1863,7 +1858,7 @@ pub type TensorAtFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn tensor_at(&self) -> TensorAtFn {
-        self.f(IDX_TENSOR_AT)
+        unsafe { self.f(IDX_TENSOR_AT) }
     }
 }
 
@@ -1877,7 +1872,7 @@ pub type CreateAndRegisterAllocatorFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_and_register_allocator(&self) -> CreateAndRegisterAllocatorFn {
-        self.f(IDX_CREATE_AND_REGISTER_ALLOCATOR)
+        unsafe { self.f(IDX_CREATE_AND_REGISTER_ALLOCATOR) }
     }
 }
 
@@ -1888,7 +1883,7 @@ pub type SetLanguageProjectionFn =
 impl Api {
     #[inline]
     pub unsafe fn set_language_projection(&self) -> SetLanguageProjectionFn {
-        self.f(IDX_SET_LANGUAGE_PROJECTION)
+        unsafe { self.f(IDX_SET_LANGUAGE_PROJECTION) }
     }
 }
 
@@ -1899,7 +1894,7 @@ pub type SessionGetProfilingStartTimeNsFn =
 impl Api {
     #[inline]
     pub unsafe fn session_get_profiling_start_time_ns(&self) -> SessionGetProfilingStartTimeNsFn {
-        self.f(IDX_SESSION_GET_PROFILING_START_TIME_NS)
+        unsafe { self.f(IDX_SESSION_GET_PROFILING_START_TIME_NS) }
     }
 }
 
@@ -1912,7 +1907,7 @@ pub type SetGlobalIntraOpNumThreadsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_global_intra_op_num_threads(&self) -> SetGlobalIntraOpNumThreadsFn {
-        self.f(IDX_SET_GLOBAL_INTRA_OP_NUM_THREADS)
+        unsafe { self.f(IDX_SET_GLOBAL_INTRA_OP_NUM_THREADS) }
     }
 }
 
@@ -1925,7 +1920,7 @@ pub type SetGlobalInterOpNumThreadsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_global_inter_op_num_threads(&self) -> SetGlobalInterOpNumThreadsFn {
-        self.f(IDX_SET_GLOBAL_INTER_OP_NUM_THREADS)
+        unsafe { self.f(IDX_SET_GLOBAL_INTER_OP_NUM_THREADS) }
     }
 }
 
@@ -1938,7 +1933,7 @@ pub type SetGlobalSpinControlFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_global_spin_control(&self) -> SetGlobalSpinControlFn {
-        self.f(IDX_SET_GLOBAL_SPIN_CONTROL)
+        unsafe { self.f(IDX_SET_GLOBAL_SPIN_CONTROL) }
     }
 }
 
@@ -1952,7 +1947,7 @@ pub type AddInitializerFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_initializer(&self) -> AddInitializerFn {
-        self.f(IDX_ADD_INITIALIZER)
+        unsafe { self.f(IDX_ADD_INITIALIZER) }
     }
 }
 
@@ -1971,7 +1966,7 @@ impl Api {
     pub unsafe fn create_env_with_custom_logger_and_global_thread_pools(
         &self,
     ) -> CreateEnvWithCustomLoggerAndGlobalThreadPoolsFn {
-        self.f(IDX_CREATE_ENV_WITH_CUSTOM_LOGGER_AND_GLOBAL_THREAD_POOLS)
+        unsafe { self.f(IDX_CREATE_ENV_WITH_CUSTOM_LOGGER_AND_GLOBAL_THREAD_POOLS) }
     }
 }
 
@@ -1982,7 +1977,7 @@ pub type SetGlobalDenormalAsZeroFn =
 impl Api {
     #[inline]
     pub unsafe fn set_global_denormal_as_zero(&self) -> SetGlobalDenormalAsZeroFn {
-        self.f(IDX_SET_GLOBAL_DENORMAL_AS_ZERO)
+        unsafe { self.f(IDX_SET_GLOBAL_DENORMAL_AS_ZERO) }
     }
 }
 
@@ -1998,7 +1993,7 @@ pub type CreateArenaCfgFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_arena_cfg(&self) -> CreateArenaCfgFn {
-        self.f(IDX_CREATE_ARENA_CFG)
+        unsafe { self.f(IDX_CREATE_ARENA_CFG) }
     }
 }
 
@@ -2008,7 +2003,7 @@ pub type ReleaseArenaCfgFn = unsafe extern "C" fn(input: *mut ArenaCfgHandle) ->
 impl Api {
     #[inline]
     pub unsafe fn release_arena_cfg(&self) -> ReleaseArenaCfgFn {
-        self.f(IDX_RELEASE_ARENA_CFG)
+        unsafe { self.f(IDX_RELEASE_ARENA_CFG) }
     }
 }
 
@@ -2024,7 +2019,7 @@ impl Api {
     pub unsafe fn model_metadata_get_graph_description(
         &self,
     ) -> ModelMetadataGetGraphDescriptionFn {
-        self.f(IDX_MODEL_METADATA_GET_GRAPH_DESCRIPTION)
+        unsafe { self.f(IDX_MODEL_METADATA_GET_GRAPH_DESCRIPTION) }
     }
 }
 
@@ -2034,7 +2029,7 @@ pub type SetCurrentGpuDeviceIdFn = unsafe extern "C" fn(device_id: core::ffi::c_
 impl Api {
     #[inline]
     pub unsafe fn set_current_gpu_device_id(&self) -> SetCurrentGpuDeviceIdFn {
-        self.f(IDX_SET_CURRENT_GPU_DEVICE_ID)
+        unsafe { self.f(IDX_SET_CURRENT_GPU_DEVICE_ID) }
     }
 }
 
@@ -2045,7 +2040,7 @@ pub type GetCurrentGpuDeviceIdFn =
 impl Api {
     #[inline]
     pub unsafe fn get_current_gpu_device_id(&self) -> GetCurrentGpuDeviceIdFn {
-        self.f(IDX_GET_CURRENT_GPU_DEVICE_ID)
+        unsafe { self.f(IDX_GET_CURRENT_GPU_DEVICE_ID) }
     }
 }
 
@@ -2060,7 +2055,7 @@ pub type CreateArenaCfgV2Fn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_arena_cfg_v2(&self) -> CreateArenaCfgV2Fn {
-        self.f(IDX_CREATE_ARENA_CFG_V2)
+        unsafe { self.f(IDX_CREATE_ARENA_CFG_V2) }
     }
 }
 
@@ -2074,7 +2069,7 @@ pub type AddRunConfigEntryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_run_config_entry(&self) -> AddRunConfigEntryFn {
-        self.f(IDX_ADD_RUN_CONFIG_ENTRY)
+        unsafe { self.f(IDX_ADD_RUN_CONFIG_ENTRY) }
     }
 }
 
@@ -2085,7 +2080,7 @@ pub type CreatePrepackedWeightsContainerFn =
 impl Api {
     #[inline]
     pub unsafe fn create_prepacked_weights_container(&self) -> CreatePrepackedWeightsContainerFn {
-        self.f(IDX_CREATE_PREPACKED_WEIGHTS_CONTAINER)
+        unsafe { self.f(IDX_CREATE_PREPACKED_WEIGHTS_CONTAINER) }
     }
 }
 
@@ -2096,7 +2091,7 @@ pub type ReleasePrepackedWeightsContainerFn =
 impl Api {
     #[inline]
     pub unsafe fn release_prepacked_weights_container(&self) -> ReleasePrepackedWeightsContainerFn {
-        self.f(IDX_RELEASE_PREPACKED_WEIGHTS_CONTAINER)
+        unsafe { self.f(IDX_RELEASE_PREPACKED_WEIGHTS_CONTAINER) }
     }
 }
 
@@ -2114,7 +2109,7 @@ impl Api {
     pub unsafe fn create_session_with_prepacked_weights_container(
         &self,
     ) -> CreateSessionWithPrepackedWeightsContainerFn {
-        self.f(IDX_CREATE_SESSION_WITH_PREPACKED_WEIGHTS_CONTAINER)
+        unsafe { self.f(IDX_CREATE_SESSION_WITH_PREPACKED_WEIGHTS_CONTAINER) }
     }
 }
 
@@ -2133,7 +2128,7 @@ impl Api {
     pub unsafe fn create_session_from_array_with_prepacked_weights_container(
         &self,
     ) -> CreateSessionFromArrayWithPrepackedWeightsContainerFn {
-        self.f(IDX_CREATE_SESSION_FROM_ARRAY_WITH_PREPACKED_WEIGHTS_CONTAINER)
+        unsafe { self.f(IDX_CREATE_SESSION_FROM_ARRAY_WITH_PREPACKED_WEIGHTS_CONTAINER) }
     }
 }
 
@@ -2144,7 +2139,7 @@ pub type EnableOrtCustomOpsFn =
 impl Api {
     #[inline]
     pub unsafe fn enable_ort_custom_ops(&self) -> EnableOrtCustomOpsFn {
-        self.f(IDX_ENABLE_ORT_CUSTOM_OPS)
+        unsafe { self.f(IDX_ENABLE_ORT_CUSTOM_OPS) }
     }
 }
 
@@ -2155,7 +2150,7 @@ pub type RegisterAllocatorFn =
 impl Api {
     #[inline]
     pub unsafe fn register_allocator(&self) -> RegisterAllocatorFn {
-        self.f(IDX_REGISTER_ALLOCATOR)
+        unsafe { self.f(IDX_REGISTER_ALLOCATOR) }
     }
 }
 
@@ -2166,7 +2161,7 @@ pub type UnregisterAllocatorFn =
 impl Api {
     #[inline]
     pub unsafe fn unregister_allocator(&self) -> UnregisterAllocatorFn {
-        self.f(IDX_UNREGISTER_ALLOCATOR)
+        unsafe { self.f(IDX_UNREGISTER_ALLOCATOR) }
     }
 }
 
@@ -2177,7 +2172,7 @@ pub type IsSparseTensorFn =
 impl Api {
     #[inline]
     pub unsafe fn is_sparse_tensor(&self) -> IsSparseTensorFn {
-        self.f(IDX_IS_SPARSE_TENSOR)
+        unsafe { self.f(IDX_IS_SPARSE_TENSOR) }
     }
 }
 
@@ -2193,7 +2188,7 @@ pub type CreateSparseTensorAsOrtValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_sparse_tensor_as_ort_value(&self) -> CreateSparseTensorAsOrtValueFn {
-        self.f(IDX_CREATE_SPARSE_TENSOR_AS_ORT_VALUE)
+        unsafe { self.f(IDX_CREATE_SPARSE_TENSOR_AS_ORT_VALUE) }
     }
 }
 
@@ -2211,7 +2206,7 @@ pub type FillSparseTensorCooFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn fill_sparse_tensor_coo(&self) -> FillSparseTensorCooFn {
-        self.f(IDX_FILL_SPARSE_TENSOR_COO)
+        unsafe { self.f(IDX_FILL_SPARSE_TENSOR_COO) }
     }
 }
 
@@ -2231,7 +2226,7 @@ pub type FillSparseTensorCsrFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn fill_sparse_tensor_csr(&self) -> FillSparseTensorCsrFn {
-        self.f(IDX_FILL_SPARSE_TENSOR_CSR)
+        unsafe { self.f(IDX_FILL_SPARSE_TENSOR_CSR) }
     }
 }
 
@@ -2250,7 +2245,7 @@ pub type FillSparseTensorBlockSparseFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn fill_sparse_tensor_block_sparse(&self) -> FillSparseTensorBlockSparseFn {
-        self.f(IDX_FILL_SPARSE_TENSOR_BLOCK_SPARSE)
+        unsafe { self.f(IDX_FILL_SPARSE_TENSOR_BLOCK_SPARSE) }
     }
 }
 
@@ -2271,7 +2266,7 @@ impl Api {
     pub unsafe fn create_sparse_tensor_with_values_as_ort_value(
         &self,
     ) -> CreateSparseTensorWithValuesAsOrtValueFn {
-        self.f(IDX_CREATE_SPARSE_TENSOR_WITH_VALUES_AS_ORT_VALUE)
+        unsafe { self.f(IDX_CREATE_SPARSE_TENSOR_WITH_VALUES_AS_ORT_VALUE) }
     }
 }
 
@@ -2285,7 +2280,7 @@ pub type UseCooIndicesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn use_coo_indices(&self) -> UseCooIndicesFn {
-        self.f(IDX_USE_COO_INDICES)
+        unsafe { self.f(IDX_USE_COO_INDICES) }
     }
 }
 
@@ -2301,7 +2296,7 @@ pub type UseCsrIndicesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn use_csr_indices(&self) -> UseCsrIndicesFn {
-        self.f(IDX_USE_CSR_INDICES)
+        unsafe { self.f(IDX_USE_CSR_INDICES) }
     }
 }
 
@@ -2316,7 +2311,7 @@ pub type UseBlockSparseIndicesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn use_block_sparse_indices(&self) -> UseBlockSparseIndicesFn {
-        self.f(IDX_USE_BLOCK_SPARSE_INDICES)
+        unsafe { self.f(IDX_USE_BLOCK_SPARSE_INDICES) }
     }
 }
 
@@ -2327,7 +2322,7 @@ pub type GetSparseTensorFormatFn =
 impl Api {
     #[inline]
     pub unsafe fn get_sparse_tensor_format(&self) -> GetSparseTensorFormatFn {
-        self.f(IDX_GET_SPARSE_TENSOR_FORMAT)
+        unsafe { self.f(IDX_GET_SPARSE_TENSOR_FORMAT) }
     }
 }
 
@@ -2342,7 +2337,7 @@ impl Api {
     pub unsafe fn get_sparse_tensor_values_type_and_shape(
         &self,
     ) -> GetSparseTensorValuesTypeAndShapeFn {
-        self.f(IDX_GET_SPARSE_TENSOR_VALUES_TYPE_AND_SHAPE)
+        unsafe { self.f(IDX_GET_SPARSE_TENSOR_VALUES_TYPE_AND_SHAPE) }
     }
 }
 
@@ -2355,7 +2350,7 @@ pub type GetSparseTensorValuesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_sparse_tensor_values(&self) -> GetSparseTensorValuesFn {
-        self.f(IDX_GET_SPARSE_TENSOR_VALUES)
+        unsafe { self.f(IDX_GET_SPARSE_TENSOR_VALUES) }
     }
 }
 
@@ -2369,7 +2364,7 @@ pub type GetSparseTensorIndicesTypeShapeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_sparse_tensor_indices_type_shape(&self) -> GetSparseTensorIndicesTypeShapeFn {
-        self.f(IDX_GET_SPARSE_TENSOR_INDICES_TYPE_SHAPE)
+        unsafe { self.f(IDX_GET_SPARSE_TENSOR_INDICES_TYPE_SHAPE) }
     }
 }
 
@@ -2384,7 +2379,7 @@ pub type GetSparseTensorIndicesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_sparse_tensor_indices(&self) -> GetSparseTensorIndicesFn {
-        self.f(IDX_GET_SPARSE_TENSOR_INDICES)
+        unsafe { self.f(IDX_GET_SPARSE_TENSOR_INDICES) }
     }
 }
 
@@ -2395,7 +2390,7 @@ pub type HasValueFn =
 impl Api {
     #[inline]
     pub unsafe fn has_value(&self) -> HasValueFn {
-        self.f(IDX_HAS_VALUE)
+        unsafe { self.f(IDX_HAS_VALUE) }
     }
 }
 
@@ -2408,7 +2403,7 @@ pub type GetTensorMemoryInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_memory_info(&self) -> GetTensorMemoryInfoFn {
-        self.f(IDX_GET_TENSOR_MEMORY_INFO)
+        unsafe { self.f(IDX_GET_TENSOR_MEMORY_INFO) }
     }
 }
 
@@ -2422,7 +2417,7 @@ pub type GetExecutionProviderApiFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_execution_provider_api(&self) -> GetExecutionProviderApiFn {
-        self.f(IDX_GET_EXECUTION_PROVIDER_API)
+        unsafe { self.f(IDX_GET_EXECUTION_PROVIDER_API) }
     }
 }
 
@@ -2437,7 +2432,7 @@ impl Api {
     pub unsafe fn session_options_set_custom_create_thread_fn(
         &self,
     ) -> SessionOptionsSetCustomCreateThreadFnFn {
-        self.f(IDX_SESSION_OPTIONS_SET_CUSTOM_CREATE_THREAD_FN)
+        unsafe { self.f(IDX_SESSION_OPTIONS_SET_CUSTOM_CREATE_THREAD_FN) }
     }
 }
 
@@ -2452,7 +2447,7 @@ impl Api {
     pub unsafe fn session_options_set_custom_thread_creation_options(
         &self,
     ) -> SessionOptionsSetCustomThreadCreationOptionsFn {
-        self.f(IDX_SESSION_OPTIONS_SET_CUSTOM_THREAD_CREATION_OPTIONS)
+        unsafe { self.f(IDX_SESSION_OPTIONS_SET_CUSTOM_THREAD_CREATION_OPTIONS) }
     }
 }
 
@@ -2467,7 +2462,7 @@ impl Api {
     pub unsafe fn session_options_set_custom_join_thread_fn(
         &self,
     ) -> SessionOptionsSetCustomJoinThreadFnFn {
-        self.f(IDX_SESSION_OPTIONS_SET_CUSTOM_JOIN_THREAD_FN)
+        unsafe { self.f(IDX_SESSION_OPTIONS_SET_CUSTOM_JOIN_THREAD_FN) }
     }
 }
 
@@ -2480,7 +2475,7 @@ pub type SetGlobalCustomCreateThreadFnFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_global_custom_create_thread_fn(&self) -> SetGlobalCustomCreateThreadFnFn {
-        self.f(IDX_SET_GLOBAL_CUSTOM_CREATE_THREAD_FN)
+        unsafe { self.f(IDX_SET_GLOBAL_CUSTOM_CREATE_THREAD_FN) }
     }
 }
 
@@ -2495,7 +2490,7 @@ impl Api {
     pub unsafe fn set_global_custom_thread_creation_options(
         &self,
     ) -> SetGlobalCustomThreadCreationOptionsFn {
-        self.f(IDX_SET_GLOBAL_CUSTOM_THREAD_CREATION_OPTIONS)
+        unsafe { self.f(IDX_SET_GLOBAL_CUSTOM_THREAD_CREATION_OPTIONS) }
     }
 }
 
@@ -2508,7 +2503,7 @@ pub type SetGlobalCustomJoinThreadFnFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_global_custom_join_thread_fn(&self) -> SetGlobalCustomJoinThreadFnFn {
-        self.f(IDX_SET_GLOBAL_CUSTOM_JOIN_THREAD_FN)
+        unsafe { self.f(IDX_SET_GLOBAL_CUSTOM_JOIN_THREAD_FN) }
     }
 }
 
@@ -2519,7 +2514,7 @@ pub type SynchronizeBoundInputsFn =
 impl Api {
     #[inline]
     pub unsafe fn synchronize_bound_inputs(&self) -> SynchronizeBoundInputsFn {
-        self.f(IDX_SYNCHRONIZE_BOUND_INPUTS)
+        unsafe { self.f(IDX_SYNCHRONIZE_BOUND_INPUTS) }
     }
 }
 
@@ -2530,7 +2525,7 @@ pub type SynchronizeBoundOutputsFn =
 impl Api {
     #[inline]
     pub unsafe fn synchronize_bound_outputs(&self) -> SynchronizeBoundOutputsFn {
-        self.f(IDX_SYNCHRONIZE_BOUND_OUTPUTS)
+        unsafe { self.f(IDX_SYNCHRONIZE_BOUND_OUTPUTS) }
     }
 }
 
@@ -2545,7 +2540,7 @@ pub type AddExternalInitializersFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_external_initializers(&self) -> AddExternalInitializersFn {
-        self.f(IDX_ADD_EXTERNAL_INITIALIZERS)
+        unsafe { self.f(IDX_ADD_EXTERNAL_INITIALIZERS) }
     }
 }
 
@@ -2561,7 +2556,7 @@ pub type CreateOpAttrFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_op_attr(&self) -> CreateOpAttrFn {
-        self.f(IDX_CREATE_OP_ATTR)
+        unsafe { self.f(IDX_CREATE_OP_ATTR) }
     }
 }
 
@@ -2578,7 +2573,7 @@ pub type InvokeOpFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn invoke_op(&self) -> InvokeOpFn {
-        self.f(IDX_INVOKE_OP)
+        unsafe { self.f(IDX_INVOKE_OP) }
     }
 }
 
@@ -2596,7 +2591,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider(
         &self,
     ) -> SessionOptionsAppendExecutionProviderFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER) }
     }
 }
 
@@ -2609,18 +2604,18 @@ pub type CopyKernelInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn copy_kernel_info(&self) -> CopyKernelInfoFn {
-        self.f(IDX_COPY_KERNEL_INFO)
+        unsafe { self.f(IDX_COPY_KERNEL_INFO) }
     }
 }
 
 // void(* MemoryInfoGetDeviceType)( const OrtMemoryInfo* ptr, OrtMemoryInfoDeviceType* out)
 pub const IDX_MEMORY_INFO_GET_DEVICE_TYPE: usize = 225;
 pub type MemoryInfoGetDeviceTypeFn =
-    unsafe extern "C" fn(ptr: *const MemoryInfoHandle, out_: *mut MemoryInfoDeviceTypeHandle) -> ();
+    unsafe extern "C" fn(ptr: *const MemoryInfoHandle, out_: *mut i32) -> ();
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_device_type(&self) -> MemoryInfoGetDeviceTypeFn {
-        self.f(IDX_MEMORY_INFO_GET_DEVICE_TYPE)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_DEVICE_TYPE) }
     }
 }
 
@@ -2631,7 +2626,7 @@ pub type UpdateEnvWithCustomLogLevelFn =
 impl Api {
     #[inline]
     pub unsafe fn update_env_with_custom_log_level(&self) -> UpdateEnvWithCustomLogLevelFn {
-        self.f(IDX_UPDATE_ENV_WITH_CUSTOM_LOG_LEVEL)
+        unsafe { self.f(IDX_UPDATE_ENV_WITH_CUSTOM_LOG_LEVEL) }
     }
 }
 
@@ -2644,7 +2639,7 @@ pub type SetGlobalIntraOpThreadAffinityFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_global_intra_op_thread_affinity(&self) -> SetGlobalIntraOpThreadAffinityFn {
-        self.f(IDX_SET_GLOBAL_INTRA_OP_THREAD_AFFINITY)
+        unsafe { self.f(IDX_SET_GLOBAL_INTRA_OP_THREAD_AFFINITY) }
     }
 }
 
@@ -2657,7 +2652,7 @@ pub type RegisterCustomOpsLibrary_v2Fn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn register_custom_ops_library_v2(&self) -> RegisterCustomOpsLibrary_v2Fn {
-        self.f(IDX_REGISTER_CUSTOM_OPS_LIBRARY_V2)
+        unsafe { self.f(IDX_REGISTER_CUSTOM_OPS_LIBRARY_V2) }
     }
 }
 
@@ -2670,7 +2665,7 @@ pub type RegisterCustomOpsUsingFunctionFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn register_custom_ops_using_function(&self) -> RegisterCustomOpsUsingFunctionFn {
-        self.f(IDX_REGISTER_CUSTOM_OPS_USING_FUNCTION)
+        unsafe { self.f(IDX_REGISTER_CUSTOM_OPS_USING_FUNCTION) }
     }
 }
 
@@ -2684,7 +2679,7 @@ pub type HasSessionConfigEntryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn has_session_config_entry(&self) -> HasSessionConfigEntryFn {
-        self.f(IDX_HAS_SESSION_CONFIG_ENTRY)
+        unsafe { self.f(IDX_HAS_SESSION_CONFIG_ENTRY) }
     }
 }
 
@@ -2699,7 +2694,7 @@ pub type GetSessionConfigEntryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_session_config_entry(&self) -> GetSessionConfigEntryFn {
-        self.f(IDX_GET_SESSION_CONFIG_ENTRY)
+        unsafe { self.f(IDX_GET_SESSION_CONFIG_ENTRY) }
     }
 }
 
@@ -2716,7 +2711,7 @@ pub type Logger_LogMessageFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn logger__log_message(&self) -> Logger_LogMessageFn {
-        self.f(IDX_LOGGER__LOG_MESSAGE)
+        unsafe { self.f(IDX_LOGGER__LOG_MESSAGE) }
     }
 }
 
@@ -2727,7 +2722,7 @@ pub type Logger_GetLoggingSeverityLevelFn =
 impl Api {
     #[inline]
     pub unsafe fn logger__get_logging_severity_level(&self) -> Logger_GetLoggingSeverityLevelFn {
-        self.f(IDX_LOGGER__GET_LOGGING_SEVERITY_LEVEL)
+        unsafe { self.f(IDX_LOGGER__GET_LOGGING_SEVERITY_LEVEL) }
     }
 }
 
@@ -2740,7 +2735,7 @@ pub type CastTypeInfoToOptionalTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn cast_type_info_to_optional_type_info(&self) -> CastTypeInfoToOptionalTypeInfoFn {
-        self.f(IDX_CAST_TYPE_INFO_TO_OPTIONAL_TYPE_INFO)
+        unsafe { self.f(IDX_CAST_TYPE_INFO_TO_OPTIONAL_TYPE_INFO) }
     }
 }
 
@@ -2753,7 +2748,7 @@ pub type GetOptionalContainedTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_optional_contained_type_info(&self) -> GetOptionalContainedTypeInfoFn {
-        self.f(IDX_GET_OPTIONAL_CONTAINED_TYPE_INFO)
+        unsafe { self.f(IDX_GET_OPTIONAL_CONTAINED_TYPE_INFO) }
     }
 }
 
@@ -2770,7 +2765,7 @@ impl Api {
     pub unsafe fn get_resized_string_tensor_element_buffer(
         &self,
     ) -> GetResizedStringTensorElementBufferFn {
-        self.f(IDX_GET_RESIZED_STRING_TENSOR_ELEMENT_BUFFER)
+        unsafe { self.f(IDX_GET_RESIZED_STRING_TENSOR_ELEMENT_BUFFER) }
     }
 }
 
@@ -2780,7 +2775,7 @@ pub type GetBuildInfoStringFn = unsafe extern "C" fn() -> *const core::ffi::c_ch
 impl Api {
     #[inline]
     pub unsafe fn get_build_info_string(&self) -> GetBuildInfoStringFn {
-        self.f(IDX_GET_BUILD_INFO_STRING)
+        unsafe { self.f(IDX_GET_BUILD_INFO_STRING) }
     }
 }
 
@@ -2798,7 +2793,7 @@ pub type CreateAndRegisterAllocatorV2Fn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_and_register_allocator_v2(&self) -> CreateAndRegisterAllocatorV2Fn {
-        self.f(IDX_CREATE_AND_REGISTER_ALLOCATOR_V2)
+        unsafe { self.f(IDX_CREATE_AND_REGISTER_ALLOCATOR_V2) }
     }
 }
 
@@ -2821,7 +2816,7 @@ pub type RunAsyncFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run_async(&self) -> RunAsyncFn {
-        self.f(IDX_RUN_ASYNC)
+        unsafe { self.f(IDX_RUN_ASYNC) }
     }
 }
 
@@ -2835,7 +2830,7 @@ pub type SetUserLoggingFunctionFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_user_logging_function(&self) -> SetUserLoggingFunctionFn {
-        self.f(IDX_SET_USER_LOGGING_FUNCTION)
+        unsafe { self.f(IDX_SET_USER_LOGGING_FUNCTION) }
     }
 }
 
@@ -2846,7 +2841,7 @@ pub type ShapeInferContext_GetInputCountFn =
 impl Api {
     #[inline]
     pub unsafe fn shape_infer_context__get_input_count(&self) -> ShapeInferContext_GetInputCountFn {
-        self.f(IDX_SHAPE_INFER_CONTEXT__GET_INPUT_COUNT)
+        unsafe { self.f(IDX_SHAPE_INFER_CONTEXT__GET_INPUT_COUNT) }
     }
 }
 
@@ -2862,7 +2857,7 @@ impl Api {
     pub unsafe fn shape_infer_context__get_input_type_shape(
         &self,
     ) -> ShapeInferContext_GetInputTypeShapeFn {
-        self.f(IDX_SHAPE_INFER_CONTEXT__GET_INPUT_TYPE_SHAPE)
+        unsafe { self.f(IDX_SHAPE_INFER_CONTEXT__GET_INPUT_TYPE_SHAPE) }
     }
 }
 
@@ -2876,7 +2871,7 @@ pub type ShapeInferContext_GetAttributeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn shape_infer_context__get_attribute(&self) -> ShapeInferContext_GetAttributeFn {
-        self.f(IDX_SHAPE_INFER_CONTEXT__GET_ATTRIBUTE)
+        unsafe { self.f(IDX_SHAPE_INFER_CONTEXT__GET_ATTRIBUTE) }
     }
 }
 
@@ -2892,7 +2887,7 @@ impl Api {
     pub unsafe fn shape_infer_context__set_output_type_shape(
         &self,
     ) -> ShapeInferContext_SetOutputTypeShapeFn {
-        self.f(IDX_SHAPE_INFER_CONTEXT__SET_OUTPUT_TYPE_SHAPE)
+        unsafe { self.f(IDX_SHAPE_INFER_CONTEXT__SET_OUTPUT_TYPE_SHAPE) }
     }
 }
 
@@ -2906,7 +2901,7 @@ pub type SetSymbolicDimensionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_symbolic_dimensions(&self) -> SetSymbolicDimensionsFn {
-        self.f(IDX_SET_SYMBOLIC_DIMENSIONS)
+        unsafe { self.f(IDX_SET_SYMBOLIC_DIMENSIONS) }
     }
 }
 
@@ -2922,7 +2917,7 @@ pub type ReadOpAttrFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn read_op_attr(&self) -> ReadOpAttrFn {
-        self.f(IDX_READ_OP_ATTR)
+        unsafe { self.f(IDX_READ_OP_ATTR) }
     }
 }
 
@@ -2933,7 +2928,7 @@ pub type SetDeterministicComputeFn =
 impl Api {
     #[inline]
     pub unsafe fn set_deterministic_compute(&self) -> SetDeterministicComputeFn {
-        self.f(IDX_SET_DETERMINISTIC_COMPUTE)
+        unsafe { self.f(IDX_SET_DETERMINISTIC_COMPUTE) }
     }
 }
 
@@ -2951,7 +2946,7 @@ impl Api {
     pub unsafe fn add_external_initializers_from_files_in_memory(
         &self,
     ) -> AddExternalInitializersFromFilesInMemoryFn {
-        self.f(IDX_ADD_EXTERNAL_INITIALIZERS_FROM_FILES_IN_MEMORY)
+        unsafe { self.f(IDX_ADD_EXTERNAL_INITIALIZERS_FROM_FILES_IN_MEMORY) }
     }
 }
 
@@ -2965,7 +2960,7 @@ pub type CreateLoraAdapterFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_lora_adapter(&self) -> CreateLoraAdapterFn {
-        self.f(IDX_CREATE_LORA_ADAPTER)
+        unsafe { self.f(IDX_CREATE_LORA_ADAPTER) }
     }
 }
 
@@ -2980,7 +2975,7 @@ pub type CreateLoraAdapterFromArrayFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_lora_adapter_from_array(&self) -> CreateLoraAdapterFromArrayFn {
-        self.f(IDX_CREATE_LORA_ADAPTER_FROM_ARRAY)
+        unsafe { self.f(IDX_CREATE_LORA_ADAPTER_FROM_ARRAY) }
     }
 }
 
@@ -2990,7 +2985,7 @@ pub type ReleaseLoraAdapterFn = unsafe extern "C" fn(input: *mut LoraAdapterHand
 impl Api {
     #[inline]
     pub unsafe fn release_lora_adapter(&self) -> ReleaseLoraAdapterFn {
-        self.f(IDX_RELEASE_LORA_ADAPTER)
+        unsafe { self.f(IDX_RELEASE_LORA_ADAPTER) }
     }
 }
 
@@ -3003,7 +2998,7 @@ pub type RunOptionsAddActiveLoraAdapterFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run_options_add_active_lora_adapter(&self) -> RunOptionsAddActiveLoraAdapterFn {
-        self.f(IDX_RUN_OPTIONS_ADD_ACTIVE_LORA_ADAPTER)
+        unsafe { self.f(IDX_RUN_OPTIONS_ADD_ACTIVE_LORA_ADAPTER) }
     }
 }
 
@@ -3018,7 +3013,7 @@ pub type SetEpDynamicOptionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn set_ep_dynamic_options(&self) -> SetEpDynamicOptionsFn {
-        self.f(IDX_SET_EP_DYNAMIC_OPTIONS)
+        unsafe { self.f(IDX_SET_EP_DYNAMIC_OPTIONS) }
     }
 }
 
@@ -3028,7 +3023,7 @@ pub type ReleaseValueInfoFn = unsafe extern "C" fn(input: *mut ValueInfoHandle) 
 impl Api {
     #[inline]
     pub unsafe fn release_value_info(&self) -> ReleaseValueInfoFn {
-        self.f(IDX_RELEASE_VALUE_INFO)
+        unsafe { self.f(IDX_RELEASE_VALUE_INFO) }
     }
 }
 
@@ -3038,7 +3033,7 @@ pub type ReleaseNodeFn = unsafe extern "C" fn(input: *mut NodeHandle) -> ();
 impl Api {
     #[inline]
     pub unsafe fn release_node(&self) -> ReleaseNodeFn {
-        self.f(IDX_RELEASE_NODE)
+        unsafe { self.f(IDX_RELEASE_NODE) }
     }
 }
 
@@ -3048,7 +3043,7 @@ pub type ReleaseGraphFn = unsafe extern "C" fn(input: *mut GraphHandle) -> ();
 impl Api {
     #[inline]
     pub unsafe fn release_graph(&self) -> ReleaseGraphFn {
-        self.f(IDX_RELEASE_GRAPH)
+        unsafe { self.f(IDX_RELEASE_GRAPH) }
     }
 }
 
@@ -3058,7 +3053,7 @@ pub type ReleaseModelFn = unsafe extern "C" fn(input: *mut ModelHandle) -> ();
 impl Api {
     #[inline]
     pub unsafe fn release_model(&self) -> ReleaseModelFn {
-        self.f(IDX_RELEASE_MODEL)
+        unsafe { self.f(IDX_RELEASE_MODEL) }
     }
 }
 
@@ -3071,7 +3066,7 @@ pub type GetValueInfoNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_value_info_name(&self) -> GetValueInfoNameFn {
-        self.f(IDX_GET_VALUE_INFO_NAME)
+        unsafe { self.f(IDX_GET_VALUE_INFO_NAME) }
     }
 }
 
@@ -3084,7 +3079,7 @@ pub type GetValueInfoTypeInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_value_info_type_info(&self) -> GetValueInfoTypeInfoFn {
-        self.f(IDX_GET_VALUE_INFO_TYPE_INFO)
+        unsafe { self.f(IDX_GET_VALUE_INFO_TYPE_INFO) }
     }
 }
 
@@ -3104,7 +3099,7 @@ impl Api {
     pub unsafe fn create_tensor_with_data_and_deleter_as_ort_value(
         &self,
     ) -> CreateTensorWithDataAndDeleterAsOrtValueFn {
-        self.f(IDX_CREATE_TENSOR_WITH_DATA_AND_DELETER_AS_ORT_VALUE)
+        unsafe { self.f(IDX_CREATE_TENSOR_WITH_DATA_AND_DELETER_AS_ORT_VALUE) }
     }
 }
 
@@ -3117,7 +3112,7 @@ impl Api {
     pub unsafe fn session_options_set_load_cancellation_flag(
         &self,
     ) -> SessionOptionsSetLoadCancellationFlagFn {
-        self.f(IDX_SESSION_OPTIONS_SET_LOAD_CANCELLATION_FLAG)
+        unsafe { self.f(IDX_SESSION_OPTIONS_SET_LOAD_CANCELLATION_FLAG) }
     }
 }
 
@@ -3127,7 +3122,7 @@ pub type CreateKeyValuePairsFn = unsafe extern "C" fn(out_: *mut *mut KeyValuePa
 impl Api {
     #[inline]
     pub unsafe fn create_key_value_pairs(&self) -> CreateKeyValuePairsFn {
-        self.f(IDX_CREATE_KEY_VALUE_PAIRS)
+        unsafe { self.f(IDX_CREATE_KEY_VALUE_PAIRS) }
     }
 }
 
@@ -3141,7 +3136,7 @@ pub type AddKeyValuePairFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn add_key_value_pair(&self) -> AddKeyValuePairFn {
-        self.f(IDX_ADD_KEY_VALUE_PAIR)
+        unsafe { self.f(IDX_ADD_KEY_VALUE_PAIR) }
     }
 }
 
@@ -3154,7 +3149,7 @@ pub type GetKeyValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_key_value(&self) -> GetKeyValueFn {
-        self.f(IDX_GET_KEY_VALUE)
+        unsafe { self.f(IDX_GET_KEY_VALUE) }
     }
 }
 
@@ -3169,7 +3164,7 @@ pub type GetKeyValuePairsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_key_value_pairs(&self) -> GetKeyValuePairsFn {
-        self.f(IDX_GET_KEY_VALUE_PAIRS)
+        unsafe { self.f(IDX_GET_KEY_VALUE_PAIRS) }
     }
 }
 
@@ -3180,7 +3175,7 @@ pub type RemoveKeyValuePairFn =
 impl Api {
     #[inline]
     pub unsafe fn remove_key_value_pair(&self) -> RemoveKeyValuePairFn {
-        self.f(IDX_REMOVE_KEY_VALUE_PAIR)
+        unsafe { self.f(IDX_REMOVE_KEY_VALUE_PAIR) }
     }
 }
 
@@ -3190,7 +3185,7 @@ pub type ReleaseKeyValuePairsFn = unsafe extern "C" fn(input: *mut KeyValuePairs
 impl Api {
     #[inline]
     pub unsafe fn release_key_value_pairs(&self) -> ReleaseKeyValuePairsFn {
-        self.f(IDX_RELEASE_KEY_VALUE_PAIRS)
+        unsafe { self.f(IDX_RELEASE_KEY_VALUE_PAIRS) }
     }
 }
 
@@ -3204,7 +3199,7 @@ pub type RegisterExecutionProviderLibraryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn register_execution_provider_library(&self) -> RegisterExecutionProviderLibraryFn {
-        self.f(IDX_REGISTER_EXECUTION_PROVIDER_LIBRARY)
+        unsafe { self.f(IDX_REGISTER_EXECUTION_PROVIDER_LIBRARY) }
     }
 }
 
@@ -3219,7 +3214,7 @@ impl Api {
     pub unsafe fn unregister_execution_provider_library(
         &self,
     ) -> UnregisterExecutionProviderLibraryFn {
-        self.f(IDX_UNREGISTER_EXECUTION_PROVIDER_LIBRARY)
+        unsafe { self.f(IDX_UNREGISTER_EXECUTION_PROVIDER_LIBRARY) }
     }
 }
 
@@ -3233,7 +3228,7 @@ pub type GetEpDevicesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_ep_devices(&self) -> GetEpDevicesFn {
-        self.f(IDX_GET_EP_DEVICES)
+        unsafe { self.f(IDX_GET_EP_DEVICES) }
     }
 }
 
@@ -3253,7 +3248,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider_v2(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_v2Fn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_V2)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_V2) }
     }
 }
 
@@ -3261,14 +3256,14 @@ impl Api {
 pub const IDX_SESSION_OPTIONS_SET_EP_SELECTION_POLICY: usize = 305;
 pub type SessionOptionsSetEpSelectionPolicyFn = unsafe extern "C" fn(
     session_options: *mut SessionOptionsHandle,
-    policy: ExecutionProviderDevicePolicyHandle,
+    policy: ExecutionProviderDevicePolicy,
 ) -> StatusPtr;
 impl Api {
     #[inline]
     pub unsafe fn session_options_set_ep_selection_policy(
         &self,
     ) -> SessionOptionsSetEpSelectionPolicyFn {
-        self.f(IDX_SESSION_OPTIONS_SET_EP_SELECTION_POLICY)
+        unsafe { self.f(IDX_SESSION_OPTIONS_SET_EP_SELECTION_POLICY) }
     }
 }
 
@@ -3276,7 +3271,18 @@ impl Api {
 pub const IDX_SESSION_OPTIONS_SET_EP_SELECTION_POLICY_DELEGATE: usize = 306;
 pub type SessionOptionsSetEpSelectionPolicyDelegateFn = unsafe extern "C" fn(
     session_options: *mut SessionOptionsHandle,
-    delegate: core::ffi::c_void,
+    delegate: Option<
+        unsafe extern "C" fn(
+            *const *const EpDeviceHandle,
+            usize,
+            *const KeyValuePairsHandle,
+            *const KeyValuePairsHandle,
+            *mut *const EpDeviceHandle,
+            usize,
+            *mut usize,
+            *mut core::ffi::c_void,
+        ) -> StatusPtr,
+    >,
     delegate_state: *mut core::ffi::c_void,
 ) -> StatusPtr;
 impl Api {
@@ -3284,7 +3290,7 @@ impl Api {
     pub unsafe fn session_options_set_ep_selection_policy_delegate(
         &self,
     ) -> SessionOptionsSetEpSelectionPolicyDelegateFn {
-        self.f(IDX_SESSION_OPTIONS_SET_EP_SELECTION_POLICY_DELEGATE)
+        unsafe { self.f(IDX_SESSION_OPTIONS_SET_EP_SELECTION_POLICY_DELEGATE) }
     }
 }
 
@@ -3294,7 +3300,7 @@ pub type HardwareDevice_TypeFn = unsafe extern "C" fn(device: *const HardwareDev
 impl Api {
     #[inline]
     pub unsafe fn hardware_device__type(&self) -> HardwareDevice_TypeFn {
-        self.f(IDX_HARDWARE_DEVICE__TYPE)
+        unsafe { self.f(IDX_HARDWARE_DEVICE__TYPE) }
     }
 }
 
@@ -3305,7 +3311,7 @@ pub type HardwareDevice_VendorIdFn =
 impl Api {
     #[inline]
     pub unsafe fn hardware_device__vendor_id(&self) -> HardwareDevice_VendorIdFn {
-        self.f(IDX_HARDWARE_DEVICE__VENDOR_ID)
+        unsafe { self.f(IDX_HARDWARE_DEVICE__VENDOR_ID) }
     }
 }
 
@@ -3316,7 +3322,7 @@ pub type HardwareDevice_VendorFn =
 impl Api {
     #[inline]
     pub unsafe fn hardware_device__vendor(&self) -> HardwareDevice_VendorFn {
-        self.f(IDX_HARDWARE_DEVICE__VENDOR)
+        unsafe { self.f(IDX_HARDWARE_DEVICE__VENDOR) }
     }
 }
 
@@ -3327,7 +3333,7 @@ pub type HardwareDevice_DeviceIdFn =
 impl Api {
     #[inline]
     pub unsafe fn hardware_device__device_id(&self) -> HardwareDevice_DeviceIdFn {
-        self.f(IDX_HARDWARE_DEVICE__DEVICE_ID)
+        unsafe { self.f(IDX_HARDWARE_DEVICE__DEVICE_ID) }
     }
 }
 
@@ -3338,7 +3344,7 @@ pub type HardwareDevice_MetadataFn =
 impl Api {
     #[inline]
     pub unsafe fn hardware_device__metadata(&self) -> HardwareDevice_MetadataFn {
-        self.f(IDX_HARDWARE_DEVICE__METADATA)
+        unsafe { self.f(IDX_HARDWARE_DEVICE__METADATA) }
     }
 }
 
@@ -3349,7 +3355,7 @@ pub type EpDevice_EpNameFn =
 impl Api {
     #[inline]
     pub unsafe fn ep_device__ep_name(&self) -> EpDevice_EpNameFn {
-        self.f(IDX_EP_DEVICE__EP_NAME)
+        unsafe { self.f(IDX_EP_DEVICE__EP_NAME) }
     }
 }
 
@@ -3360,7 +3366,7 @@ pub type EpDevice_EpVendorFn =
 impl Api {
     #[inline]
     pub unsafe fn ep_device__ep_vendor(&self) -> EpDevice_EpVendorFn {
-        self.f(IDX_EP_DEVICE__EP_VENDOR)
+        unsafe { self.f(IDX_EP_DEVICE__EP_VENDOR) }
     }
 }
 
@@ -3371,7 +3377,7 @@ pub type EpDevice_EpMetadataFn =
 impl Api {
     #[inline]
     pub unsafe fn ep_device__ep_metadata(&self) -> EpDevice_EpMetadataFn {
-        self.f(IDX_EP_DEVICE__EP_METADATA)
+        unsafe { self.f(IDX_EP_DEVICE__EP_METADATA) }
     }
 }
 
@@ -3382,7 +3388,7 @@ pub type EpDevice_EpOptionsFn =
 impl Api {
     #[inline]
     pub unsafe fn ep_device__ep_options(&self) -> EpDevice_EpOptionsFn {
-        self.f(IDX_EP_DEVICE__EP_OPTIONS)
+        unsafe { self.f(IDX_EP_DEVICE__EP_OPTIONS) }
     }
 }
 
@@ -3393,7 +3399,7 @@ pub type EpDevice_DeviceFn =
 impl Api {
     #[inline]
     pub unsafe fn ep_device__device(&self) -> EpDevice_DeviceFn {
-        self.f(IDX_EP_DEVICE__DEVICE)
+        unsafe { self.f(IDX_EP_DEVICE__DEVICE) }
     }
 }
 
@@ -3404,7 +3410,7 @@ pub type GetTensorSizeInBytesFn =
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_size_in_bytes(&self) -> GetTensorSizeInBytesFn {
-        self.f(IDX_GET_TENSOR_SIZE_IN_BYTES)
+        unsafe { self.f(IDX_GET_TENSOR_SIZE_IN_BYTES) }
     }
 }
 
@@ -3417,7 +3423,7 @@ pub type AllocatorGetStatsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn allocator_get_stats(&self) -> AllocatorGetStatsFn {
-        self.f(IDX_ALLOCATOR_GET_STATS)
+        unsafe { self.f(IDX_ALLOCATOR_GET_STATS) }
     }
 }
 
@@ -3425,7 +3431,7 @@ impl Api {
 pub const IDX_CREATE_MEMORY_INFO_V2: usize = 320;
 pub type CreateMemoryInfo_v2Fn = unsafe extern "C" fn(
     name: *const core::ffi::c_char,
-    device_type: MemoryInfoDeviceTypeHandle,
+    device_type: i32,
     vendor_id: u32,
     device_id: i32,
     mem_type: i32,
@@ -3436,7 +3442,7 @@ pub type CreateMemoryInfo_v2Fn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_memory_info_v2(&self) -> CreateMemoryInfo_v2Fn {
-        self.f(IDX_CREATE_MEMORY_INFO_V2)
+        unsafe { self.f(IDX_CREATE_MEMORY_INFO_V2) }
     }
 }
 
@@ -3446,7 +3452,7 @@ pub type MemoryInfoGetDeviceMemTypeFn = unsafe extern "C" fn(ptr: *const MemoryI
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_device_mem_type(&self) -> MemoryInfoGetDeviceMemTypeFn {
-        self.f(IDX_MEMORY_INFO_GET_DEVICE_MEM_TYPE)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_DEVICE_MEM_TYPE) }
     }
 }
 
@@ -3456,7 +3462,7 @@ pub type MemoryInfoGetVendorIdFn = unsafe extern "C" fn(ptr: *const MemoryInfoHa
 impl Api {
     #[inline]
     pub unsafe fn memory_info_get_vendor_id(&self) -> MemoryInfoGetVendorIdFn {
-        self.f(IDX_MEMORY_INFO_GET_VENDOR_ID)
+        unsafe { self.f(IDX_MEMORY_INFO_GET_VENDOR_ID) }
     }
 }
 
@@ -3470,7 +3476,7 @@ pub type ValueInfo_GetValueProducerFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__get_value_producer(&self) -> ValueInfo_GetValueProducerFn {
-        self.f(IDX_VALUE_INFO__GET_VALUE_PRODUCER)
+        unsafe { self.f(IDX_VALUE_INFO__GET_VALUE_PRODUCER) }
     }
 }
 
@@ -3483,7 +3489,7 @@ pub type ValueInfo_GetValueNumConsumersFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__get_value_num_consumers(&self) -> ValueInfo_GetValueNumConsumersFn {
-        self.f(IDX_VALUE_INFO__GET_VALUE_NUM_CONSUMERS)
+        unsafe { self.f(IDX_VALUE_INFO__GET_VALUE_NUM_CONSUMERS) }
     }
 }
 
@@ -3498,7 +3504,7 @@ pub type ValueInfo_GetValueConsumersFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__get_value_consumers(&self) -> ValueInfo_GetValueConsumersFn {
-        self.f(IDX_VALUE_INFO__GET_VALUE_CONSUMERS)
+        unsafe { self.f(IDX_VALUE_INFO__GET_VALUE_CONSUMERS) }
     }
 }
 
@@ -3511,7 +3517,7 @@ pub type ValueInfo_GetInitializerValueFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__get_initializer_value(&self) -> ValueInfo_GetInitializerValueFn {
-        self.f(IDX_VALUE_INFO__GET_INITIALIZER_VALUE)
+        unsafe { self.f(IDX_VALUE_INFO__GET_INITIALIZER_VALUE) }
     }
 }
 
@@ -3526,7 +3532,7 @@ impl Api {
     pub unsafe fn value_info__get_external_initializer_info(
         &self,
     ) -> ValueInfo_GetExternalInitializerInfoFn {
-        self.f(IDX_VALUE_INFO__GET_EXTERNAL_INITIALIZER_INFO)
+        unsafe { self.f(IDX_VALUE_INFO__GET_EXTERNAL_INITIALIZER_INFO) }
     }
 }
 
@@ -3539,7 +3545,7 @@ pub type ValueInfo_IsRequiredGraphInputFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__is_required_graph_input(&self) -> ValueInfo_IsRequiredGraphInputFn {
-        self.f(IDX_VALUE_INFO__IS_REQUIRED_GRAPH_INPUT)
+        unsafe { self.f(IDX_VALUE_INFO__IS_REQUIRED_GRAPH_INPUT) }
     }
 }
 
@@ -3552,7 +3558,7 @@ pub type ValueInfo_IsOptionalGraphInputFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__is_optional_graph_input(&self) -> ValueInfo_IsOptionalGraphInputFn {
-        self.f(IDX_VALUE_INFO__IS_OPTIONAL_GRAPH_INPUT)
+        unsafe { self.f(IDX_VALUE_INFO__IS_OPTIONAL_GRAPH_INPUT) }
     }
 }
 
@@ -3565,7 +3571,7 @@ pub type ValueInfo_IsGraphOutputFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__is_graph_output(&self) -> ValueInfo_IsGraphOutputFn {
-        self.f(IDX_VALUE_INFO__IS_GRAPH_OUTPUT)
+        unsafe { self.f(IDX_VALUE_INFO__IS_GRAPH_OUTPUT) }
     }
 }
 
@@ -3578,7 +3584,7 @@ pub type ValueInfo_IsConstantInitializerFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__is_constant_initializer(&self) -> ValueInfo_IsConstantInitializerFn {
-        self.f(IDX_VALUE_INFO__IS_CONSTANT_INITIALIZER)
+        unsafe { self.f(IDX_VALUE_INFO__IS_CONSTANT_INITIALIZER) }
     }
 }
 
@@ -3591,7 +3597,7 @@ pub type ValueInfo_IsFromOuterScopeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn value_info__is_from_outer_scope(&self) -> ValueInfo_IsFromOuterScopeFn {
-        self.f(IDX_VALUE_INFO__IS_FROM_OUTER_SCOPE)
+        unsafe { self.f(IDX_VALUE_INFO__IS_FROM_OUTER_SCOPE) }
     }
 }
 
@@ -3604,7 +3610,7 @@ pub type Graph_GetNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_name(&self) -> Graph_GetNameFn {
-        self.f(IDX_GRAPH__GET_NAME)
+        unsafe { self.f(IDX_GRAPH__GET_NAME) }
     }
 }
 
@@ -3617,7 +3623,7 @@ pub type Graph_GetModelPathFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_model_path(&self) -> Graph_GetModelPathFn {
-        self.f(IDX_GRAPH__GET_MODEL_PATH)
+        unsafe { self.f(IDX_GRAPH__GET_MODEL_PATH) }
     }
 }
 
@@ -3628,7 +3634,7 @@ pub type Graph_GetOnnxIrVersionFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_onnx_ir_version(&self) -> Graph_GetOnnxIrVersionFn {
-        self.f(IDX_GRAPH__GET_ONNX_IR_VERSION)
+        unsafe { self.f(IDX_GRAPH__GET_ONNX_IR_VERSION) }
     }
 }
 
@@ -3639,7 +3645,7 @@ pub type Graph_GetNumOperatorSetsFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_num_operator_sets(&self) -> Graph_GetNumOperatorSetsFn {
-        self.f(IDX_GRAPH__GET_NUM_OPERATOR_SETS)
+        unsafe { self.f(IDX_GRAPH__GET_NUM_OPERATOR_SETS) }
     }
 }
 
@@ -3654,7 +3660,7 @@ pub type Graph_GetOperatorSetsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_operator_sets(&self) -> Graph_GetOperatorSetsFn {
-        self.f(IDX_GRAPH__GET_OPERATOR_SETS)
+        unsafe { self.f(IDX_GRAPH__GET_OPERATOR_SETS) }
     }
 }
 
@@ -3665,7 +3671,7 @@ pub type Graph_GetNumInputsFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_num_inputs(&self) -> Graph_GetNumInputsFn {
-        self.f(IDX_GRAPH__GET_NUM_INPUTS)
+        unsafe { self.f(IDX_GRAPH__GET_NUM_INPUTS) }
     }
 }
 
@@ -3679,7 +3685,7 @@ pub type Graph_GetInputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_inputs(&self) -> Graph_GetInputsFn {
-        self.f(IDX_GRAPH__GET_INPUTS)
+        unsafe { self.f(IDX_GRAPH__GET_INPUTS) }
     }
 }
 
@@ -3690,7 +3696,7 @@ pub type Graph_GetNumOutputsFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_num_outputs(&self) -> Graph_GetNumOutputsFn {
-        self.f(IDX_GRAPH__GET_NUM_OUTPUTS)
+        unsafe { self.f(IDX_GRAPH__GET_NUM_OUTPUTS) }
     }
 }
 
@@ -3704,7 +3710,7 @@ pub type Graph_GetOutputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_outputs(&self) -> Graph_GetOutputsFn {
-        self.f(IDX_GRAPH__GET_OUTPUTS)
+        unsafe { self.f(IDX_GRAPH__GET_OUTPUTS) }
     }
 }
 
@@ -3715,7 +3721,7 @@ pub type Graph_GetNumInitializersFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_num_initializers(&self) -> Graph_GetNumInitializersFn {
-        self.f(IDX_GRAPH__GET_NUM_INITIALIZERS)
+        unsafe { self.f(IDX_GRAPH__GET_NUM_INITIALIZERS) }
     }
 }
 
@@ -3729,7 +3735,7 @@ pub type Graph_GetInitializersFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_initializers(&self) -> Graph_GetInitializersFn {
-        self.f(IDX_GRAPH__GET_INITIALIZERS)
+        unsafe { self.f(IDX_GRAPH__GET_INITIALIZERS) }
     }
 }
 
@@ -3740,7 +3746,7 @@ pub type Graph_GetNumNodesFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_num_nodes(&self) -> Graph_GetNumNodesFn {
-        self.f(IDX_GRAPH__GET_NUM_NODES)
+        unsafe { self.f(IDX_GRAPH__GET_NUM_NODES) }
     }
 }
 
@@ -3754,7 +3760,7 @@ pub type Graph_GetNodesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_nodes(&self) -> Graph_GetNodesFn {
-        self.f(IDX_GRAPH__GET_NODES)
+        unsafe { self.f(IDX_GRAPH__GET_NODES) }
     }
 }
 
@@ -3765,7 +3771,7 @@ pub type Graph_GetParentNodeFn =
 impl Api {
     #[inline]
     pub unsafe fn graph__get_parent_node(&self) -> Graph_GetParentNodeFn {
-        self.f(IDX_GRAPH__GET_PARENT_NODE)
+        unsafe { self.f(IDX_GRAPH__GET_PARENT_NODE) }
     }
 }
 
@@ -3780,7 +3786,7 @@ pub type Graph_GetGraphViewFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_graph_view(&self) -> Graph_GetGraphViewFn {
-        self.f(IDX_GRAPH__GET_GRAPH_VIEW)
+        unsafe { self.f(IDX_GRAPH__GET_GRAPH_VIEW) }
     }
 }
 
@@ -3791,7 +3797,7 @@ pub type Node_GetIdFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_id(&self) -> Node_GetIdFn {
-        self.f(IDX_NODE__GET_ID)
+        unsafe { self.f(IDX_NODE__GET_ID) }
     }
 }
 
@@ -3804,7 +3810,7 @@ pub type Node_GetNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_name(&self) -> Node_GetNameFn {
-        self.f(IDX_NODE__GET_NAME)
+        unsafe { self.f(IDX_NODE__GET_NAME) }
     }
 }
 
@@ -3817,7 +3823,7 @@ pub type Node_GetOperatorTypeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_operator_type(&self) -> Node_GetOperatorTypeFn {
-        self.f(IDX_NODE__GET_OPERATOR_TYPE)
+        unsafe { self.f(IDX_NODE__GET_OPERATOR_TYPE) }
     }
 }
 
@@ -3830,7 +3836,7 @@ pub type Node_GetDomainFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_domain(&self) -> Node_GetDomainFn {
-        self.f(IDX_NODE__GET_DOMAIN)
+        unsafe { self.f(IDX_NODE__GET_DOMAIN) }
     }
 }
 
@@ -3843,7 +3849,7 @@ pub type Node_GetSinceVersionFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_since_version(&self) -> Node_GetSinceVersionFn {
-        self.f(IDX_NODE__GET_SINCE_VERSION)
+        unsafe { self.f(IDX_NODE__GET_SINCE_VERSION) }
     }
 }
 
@@ -3854,7 +3860,7 @@ pub type Node_GetNumInputsFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_num_inputs(&self) -> Node_GetNumInputsFn {
-        self.f(IDX_NODE__GET_NUM_INPUTS)
+        unsafe { self.f(IDX_NODE__GET_NUM_INPUTS) }
     }
 }
 
@@ -3868,7 +3874,7 @@ pub type Node_GetInputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_inputs(&self) -> Node_GetInputsFn {
-        self.f(IDX_NODE__GET_INPUTS)
+        unsafe { self.f(IDX_NODE__GET_INPUTS) }
     }
 }
 
@@ -3879,7 +3885,7 @@ pub type Node_GetNumOutputsFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_num_outputs(&self) -> Node_GetNumOutputsFn {
-        self.f(IDX_NODE__GET_NUM_OUTPUTS)
+        unsafe { self.f(IDX_NODE__GET_NUM_OUTPUTS) }
     }
 }
 
@@ -3893,7 +3899,7 @@ pub type Node_GetOutputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_outputs(&self) -> Node_GetOutputsFn {
-        self.f(IDX_NODE__GET_OUTPUTS)
+        unsafe { self.f(IDX_NODE__GET_OUTPUTS) }
     }
 }
 
@@ -3904,7 +3910,7 @@ pub type Node_GetNumImplicitInputsFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_num_implicit_inputs(&self) -> Node_GetNumImplicitInputsFn {
-        self.f(IDX_NODE__GET_NUM_IMPLICIT_INPUTS)
+        unsafe { self.f(IDX_NODE__GET_NUM_IMPLICIT_INPUTS) }
     }
 }
 
@@ -3918,7 +3924,7 @@ pub type Node_GetImplicitInputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_implicit_inputs(&self) -> Node_GetImplicitInputsFn {
-        self.f(IDX_NODE__GET_IMPLICIT_INPUTS)
+        unsafe { self.f(IDX_NODE__GET_IMPLICIT_INPUTS) }
     }
 }
 
@@ -3929,7 +3935,7 @@ pub type Node_GetNumAttributesFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_num_attributes(&self) -> Node_GetNumAttributesFn {
-        self.f(IDX_NODE__GET_NUM_ATTRIBUTES)
+        unsafe { self.f(IDX_NODE__GET_NUM_ATTRIBUTES) }
     }
 }
 
@@ -3943,7 +3949,7 @@ pub type Node_GetAttributesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_attributes(&self) -> Node_GetAttributesFn {
-        self.f(IDX_NODE__GET_ATTRIBUTES)
+        unsafe { self.f(IDX_NODE__GET_ATTRIBUTES) }
     }
 }
 
@@ -3957,7 +3963,7 @@ pub type Node_GetAttributeByNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_attribute_by_name(&self) -> Node_GetAttributeByNameFn {
-        self.f(IDX_NODE__GET_ATTRIBUTE_BY_NAME)
+        unsafe { self.f(IDX_NODE__GET_ATTRIBUTE_BY_NAME) }
     }
 }
 
@@ -3972,7 +3978,7 @@ impl Api {
     pub unsafe fn op_attr__get_tensor_attribute_as_ort_value(
         &self,
     ) -> OpAttr_GetTensorAttributeAsOrtValueFn {
-        self.f(IDX_OP_ATTR__GET_TENSOR_ATTRIBUTE_AS_ORT_VALUE)
+        unsafe { self.f(IDX_OP_ATTR__GET_TENSOR_ATTRIBUTE_AS_ORT_VALUE) }
     }
 }
 
@@ -3983,7 +3989,7 @@ pub type OpAttr_GetTypeFn =
 impl Api {
     #[inline]
     pub unsafe fn op_attr__get_type(&self) -> OpAttr_GetTypeFn {
-        self.f(IDX_OP_ATTR__GET_TYPE)
+        unsafe { self.f(IDX_OP_ATTR__GET_TYPE) }
     }
 }
 
@@ -3996,7 +4002,7 @@ pub type OpAttr_GetNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn op_attr__get_name(&self) -> OpAttr_GetNameFn {
-        self.f(IDX_OP_ATTR__GET_NAME)
+        unsafe { self.f(IDX_OP_ATTR__GET_NAME) }
     }
 }
 
@@ -4007,7 +4013,7 @@ pub type Node_GetNumSubgraphsFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_num_subgraphs(&self) -> Node_GetNumSubgraphsFn {
-        self.f(IDX_NODE__GET_NUM_SUBGRAPHS)
+        unsafe { self.f(IDX_NODE__GET_NUM_SUBGRAPHS) }
     }
 }
 
@@ -4022,7 +4028,7 @@ pub type Node_GetSubgraphsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_subgraphs(&self) -> Node_GetSubgraphsFn {
-        self.f(IDX_NODE__GET_SUBGRAPHS)
+        unsafe { self.f(IDX_NODE__GET_SUBGRAPHS) }
     }
 }
 
@@ -4033,7 +4039,7 @@ pub type Node_GetGraphFn =
 impl Api {
     #[inline]
     pub unsafe fn node__get_graph(&self) -> Node_GetGraphFn {
-        self.f(IDX_NODE__GET_GRAPH)
+        unsafe { self.f(IDX_NODE__GET_GRAPH) }
     }
 }
 
@@ -4046,7 +4052,7 @@ pub type Node_GetEpNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn node__get_ep_name(&self) -> Node_GetEpNameFn {
-        self.f(IDX_NODE__GET_EP_NAME)
+        unsafe { self.f(IDX_NODE__GET_EP_NAME) }
     }
 }
 
@@ -4057,7 +4063,7 @@ pub type ReleaseExternalInitializerInfoFn =
 impl Api {
     #[inline]
     pub unsafe fn release_external_initializer_info(&self) -> ReleaseExternalInitializerInfoFn {
-        self.f(IDX_RELEASE_EXTERNAL_INITIALIZER_INFO)
+        unsafe { self.f(IDX_RELEASE_EXTERNAL_INITIALIZER_INFO) }
     }
 }
 
@@ -4070,7 +4076,7 @@ impl Api {
     pub unsafe fn external_initializer_info__get_file_path(
         &self,
     ) -> ExternalInitializerInfo_GetFilePathFn {
-        self.f(IDX_EXTERNAL_INITIALIZER_INFO__GET_FILE_PATH)
+        unsafe { self.f(IDX_EXTERNAL_INITIALIZER_INFO__GET_FILE_PATH) }
     }
 }
 
@@ -4083,7 +4089,7 @@ impl Api {
     pub unsafe fn external_initializer_info__get_file_offset(
         &self,
     ) -> ExternalInitializerInfo_GetFileOffsetFn {
-        self.f(IDX_EXTERNAL_INITIALIZER_INFO__GET_FILE_OFFSET)
+        unsafe { self.f(IDX_EXTERNAL_INITIALIZER_INFO__GET_FILE_OFFSET) }
     }
 }
 
@@ -4096,7 +4102,7 @@ impl Api {
     pub unsafe fn external_initializer_info__get_byte_size(
         &self,
     ) -> ExternalInitializerInfo_GetByteSizeFn {
-        self.f(IDX_EXTERNAL_INITIALIZER_INFO__GET_BYTE_SIZE)
+        unsafe { self.f(IDX_EXTERNAL_INITIALIZER_INFO__GET_BYTE_SIZE) }
     }
 }
 
@@ -4109,7 +4115,7 @@ pub type GetRunConfigEntryFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_run_config_entry(&self) -> GetRunConfigEntryFn {
-        self.f(IDX_GET_RUN_CONFIG_ENTRY)
+        unsafe { self.f(IDX_GET_RUN_CONFIG_ENTRY) }
     }
 }
 
@@ -4122,7 +4128,7 @@ pub type EpDevice_MemoryInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn ep_device__memory_info(&self) -> EpDevice_MemoryInfoFn {
-        self.f(IDX_EP_DEVICE__MEMORY_INFO)
+        unsafe { self.f(IDX_EP_DEVICE__MEMORY_INFO) }
     }
 }
 
@@ -4139,7 +4145,7 @@ pub type CreateSharedAllocatorFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_shared_allocator(&self) -> CreateSharedAllocatorFn {
-        self.f(IDX_CREATE_SHARED_ALLOCATOR)
+        unsafe { self.f(IDX_CREATE_SHARED_ALLOCATOR) }
     }
 }
 
@@ -4153,7 +4159,7 @@ pub type GetSharedAllocatorFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_shared_allocator(&self) -> GetSharedAllocatorFn {
-        self.f(IDX_GET_SHARED_ALLOCATOR)
+        unsafe { self.f(IDX_GET_SHARED_ALLOCATOR) }
     }
 }
 
@@ -4167,7 +4173,7 @@ pub type ReleaseSharedAllocatorFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn release_shared_allocator(&self) -> ReleaseSharedAllocatorFn {
-        self.f(IDX_RELEASE_SHARED_ALLOCATOR)
+        unsafe { self.f(IDX_RELEASE_SHARED_ALLOCATOR) }
     }
 }
 
@@ -4180,7 +4186,7 @@ pub type GetTensorDataFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_tensor_data(&self) -> GetTensorDataFn {
-        self.f(IDX_GET_TENSOR_DATA)
+        unsafe { self.f(IDX_GET_TENSOR_DATA) }
     }
 }
 
@@ -4193,7 +4199,7 @@ pub type GetSessionOptionsConfigEntriesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_session_options_config_entries(&self) -> GetSessionOptionsConfigEntriesFn {
-        self.f(IDX_GET_SESSION_OPTIONS_CONFIG_ENTRIES)
+        unsafe { self.f(IDX_GET_SESSION_OPTIONS_CONFIG_ENTRIES) }
     }
 }
 
@@ -4207,7 +4213,7 @@ pub type SessionGetMemoryInfoForInputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_memory_info_for_inputs(&self) -> SessionGetMemoryInfoForInputsFn {
-        self.f(IDX_SESSION_GET_MEMORY_INFO_FOR_INPUTS)
+        unsafe { self.f(IDX_SESSION_GET_MEMORY_INFO_FOR_INPUTS) }
     }
 }
 
@@ -4221,7 +4227,7 @@ pub type SessionGetMemoryInfoForOutputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_memory_info_for_outputs(&self) -> SessionGetMemoryInfoForOutputsFn {
-        self.f(IDX_SESSION_GET_MEMORY_INFO_FOR_OUTPUTS)
+        unsafe { self.f(IDX_SESSION_GET_MEMORY_INFO_FOR_OUTPUTS) }
     }
 }
 
@@ -4235,7 +4241,7 @@ pub type SessionGetEpDeviceForInputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_ep_device_for_inputs(&self) -> SessionGetEpDeviceForInputsFn {
-        self.f(IDX_SESSION_GET_EP_DEVICE_FOR_INPUTS)
+        unsafe { self.f(IDX_SESSION_GET_EP_DEVICE_FOR_INPUTS) }
     }
 }
 
@@ -4249,7 +4255,7 @@ pub type CreateSyncStreamForEpDeviceFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_sync_stream_for_ep_device(&self) -> CreateSyncStreamForEpDeviceFn {
-        self.f(IDX_CREATE_SYNC_STREAM_FOR_EP_DEVICE)
+        unsafe { self.f(IDX_CREATE_SYNC_STREAM_FOR_EP_DEVICE) }
     }
 }
 
@@ -4260,7 +4266,7 @@ pub type SyncStream_GetHandleFn =
 impl Api {
     #[inline]
     pub unsafe fn sync_stream__get_handle(&self) -> SyncStream_GetHandleFn {
-        self.f(IDX_SYNC_STREAM__GET_HANDLE)
+        unsafe { self.f(IDX_SYNC_STREAM__GET_HANDLE) }
     }
 }
 
@@ -4270,7 +4276,7 @@ pub type ReleaseSyncStreamFn = unsafe extern "C" fn(input: *mut SyncStreamHandle
 impl Api {
     #[inline]
     pub unsafe fn release_sync_stream(&self) -> ReleaseSyncStreamFn {
-        self.f(IDX_RELEASE_SYNC_STREAM)
+        unsafe { self.f(IDX_RELEASE_SYNC_STREAM) }
     }
 }
 
@@ -4286,7 +4292,7 @@ pub type CopyTensorsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn copy_tensors(&self) -> CopyTensorsFn {
-        self.f(IDX_COPY_TENSORS)
+        unsafe { self.f(IDX_COPY_TENSORS) }
     }
 }
 
@@ -4299,7 +4305,7 @@ pub type Graph_GetModelMetadataFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn graph__get_model_metadata(&self) -> Graph_GetModelMetadataFn {
-        self.f(IDX_GRAPH__GET_MODEL_METADATA)
+        unsafe { self.f(IDX_GRAPH__GET_MODEL_METADATA) }
     }
 }
 
@@ -4309,14 +4315,14 @@ pub type GetModelCompatibilityForEpDevicesFn = unsafe extern "C" fn(
     ep_devices: *const *const EpDeviceHandle,
     num_ep_devices: usize,
     compatibility_info: *const core::ffi::c_char,
-    out_status: *mut CompiledModelCompatibilityHandle,
+    out_status: *mut i32,
 ) -> StatusPtr;
 impl Api {
     #[inline]
     pub unsafe fn get_model_compatibility_for_ep_devices(
         &self,
     ) -> GetModelCompatibilityForEpDevicesFn {
-        self.f(IDX_GET_MODEL_COMPATIBILITY_FOR_EP_DEVICES)
+        unsafe { self.f(IDX_GET_MODEL_COMPATIBILITY_FOR_EP_DEVICES) }
     }
 }
 
@@ -4331,7 +4337,7 @@ pub type CreateExternalInitializerInfoFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_external_initializer_info(&self) -> CreateExternalInitializerInfoFn {
-        self.f(IDX_CREATE_EXTERNAL_INITIALIZER_INFO)
+        unsafe { self.f(IDX_CREATE_EXTERNAL_INITIALIZER_INFO) }
     }
 }
 
@@ -4342,7 +4348,7 @@ pub type TensorTypeAndShape_HasShapeFn =
 impl Api {
     #[inline]
     pub unsafe fn tensor_type_and_shape__has_shape(&self) -> TensorTypeAndShape_HasShapeFn {
-        self.f(IDX_TENSOR_TYPE_AND_SHAPE__HAS_SHAPE)
+        unsafe { self.f(IDX_TENSOR_TYPE_AND_SHAPE__HAS_SHAPE) }
     }
 }
 
@@ -4356,7 +4362,7 @@ pub type SessionGetEpDeviceForOutputsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn session_get_ep_device_for_outputs(&self) -> SessionGetEpDeviceForOutputsFn {
-        self.f(IDX_SESSION_GET_EP_DEVICE_FOR_OUTPUTS)
+        unsafe { self.f(IDX_SESSION_GET_EP_DEVICE_FOR_OUTPUTS) }
     }
 }
 
@@ -4367,7 +4373,7 @@ pub type GetNumHardwareDevicesFn =
 impl Api {
     #[inline]
     pub unsafe fn get_num_hardware_devices(&self) -> GetNumHardwareDevicesFn {
-        self.f(IDX_GET_NUM_HARDWARE_DEVICES)
+        unsafe { self.f(IDX_GET_NUM_HARDWARE_DEVICES) }
     }
 }
 
@@ -4381,7 +4387,7 @@ pub type GetHardwareDevicesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_hardware_devices(&self) -> GetHardwareDevicesFn {
-        self.f(IDX_GET_HARDWARE_DEVICES)
+        unsafe { self.f(IDX_GET_HARDWARE_DEVICES) }
     }
 }
 
@@ -4398,7 +4404,7 @@ impl Api {
     pub unsafe fn get_hardware_device_ep_incompatibility_details(
         &self,
     ) -> GetHardwareDeviceEpIncompatibilityDetailsFn {
-        self.f(IDX_GET_HARDWARE_DEVICE_EP_INCOMPATIBILITY_DETAILS)
+        unsafe { self.f(IDX_GET_HARDWARE_DEVICE_EP_INCOMPATIBILITY_DETAILS) }
     }
 }
 
@@ -4413,7 +4419,7 @@ impl Api {
     pub unsafe fn device_ep_incompatibility_details__get_reasons_bitmask(
         &self,
     ) -> DeviceEpIncompatibilityDetails_GetReasonsBitmaskFn {
-        self.f(IDX_DEVICE_EP_INCOMPATIBILITY_DETAILS__GET_REASONS_BITMASK)
+        unsafe { self.f(IDX_DEVICE_EP_INCOMPATIBILITY_DETAILS__GET_REASONS_BITMASK) }
     }
 }
 
@@ -4428,7 +4434,7 @@ impl Api {
     pub unsafe fn device_ep_incompatibility_details__get_notes(
         &self,
     ) -> DeviceEpIncompatibilityDetails_GetNotesFn {
-        self.f(IDX_DEVICE_EP_INCOMPATIBILITY_DETAILS__GET_NOTES)
+        unsafe { self.f(IDX_DEVICE_EP_INCOMPATIBILITY_DETAILS__GET_NOTES) }
     }
 }
 
@@ -4443,7 +4449,7 @@ impl Api {
     pub unsafe fn device_ep_incompatibility_details__get_error_code(
         &self,
     ) -> DeviceEpIncompatibilityDetails_GetErrorCodeFn {
-        self.f(IDX_DEVICE_EP_INCOMPATIBILITY_DETAILS__GET_ERROR_CODE)
+        unsafe { self.f(IDX_DEVICE_EP_INCOMPATIBILITY_DETAILS__GET_ERROR_CODE) }
     }
 }
 
@@ -4456,7 +4462,7 @@ impl Api {
     pub unsafe fn release_device_ep_incompatibility_details(
         &self,
     ) -> ReleaseDeviceEpIncompatibilityDetailsFn {
-        self.f(IDX_RELEASE_DEVICE_EP_INCOMPATIBILITY_DETAILS)
+        unsafe { self.f(IDX_RELEASE_DEVICE_EP_INCOMPATIBILITY_DETAILS) }
     }
 }
 
@@ -4471,7 +4477,7 @@ pub type GetCompatibilityInfoFromModelFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn get_compatibility_info_from_model(&self) -> GetCompatibilityInfoFromModelFn {
-        self.f(IDX_GET_COMPATIBILITY_INFO_FROM_MODEL)
+        unsafe { self.f(IDX_GET_COMPATIBILITY_INFO_FROM_MODEL) }
     }
 }
 
@@ -4489,7 +4495,7 @@ impl Api {
     pub unsafe fn get_compatibility_info_from_model_bytes(
         &self,
     ) -> GetCompatibilityInfoFromModelBytesFn {
-        self.f(IDX_GET_COMPATIBILITY_INFO_FROM_MODEL_BYTES)
+        unsafe { self.f(IDX_GET_COMPATIBILITY_INFO_FROM_MODEL_BYTES) }
     }
 }
 
@@ -4502,7 +4508,7 @@ pub type CreateEnvWithOptionsFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn create_env_with_options(&self) -> CreateEnvWithOptionsFn {
-        self.f(IDX_CREATE_ENV_WITH_OPTIONS)
+        unsafe { self.f(IDX_CREATE_ENV_WITH_OPTIONS) }
     }
 }
 
@@ -4518,7 +4524,7 @@ impl Api {
     pub unsafe fn session__get_ep_graph_assignment_info(
         &self,
     ) -> Session_GetEpGraphAssignmentInfoFn {
-        self.f(IDX_SESSION__GET_EP_GRAPH_ASSIGNMENT_INFO)
+        unsafe { self.f(IDX_SESSION__GET_EP_GRAPH_ASSIGNMENT_INFO) }
     }
 }
 
@@ -4531,7 +4537,7 @@ pub type EpAssignedSubgraph_GetEpNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn ep_assigned_subgraph__get_ep_name(&self) -> EpAssignedSubgraph_GetEpNameFn {
-        self.f(IDX_EP_ASSIGNED_SUBGRAPH__GET_EP_NAME)
+        unsafe { self.f(IDX_EP_ASSIGNED_SUBGRAPH__GET_EP_NAME) }
     }
 }
 
@@ -4545,7 +4551,7 @@ pub type EpAssignedSubgraph_GetNodesFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn ep_assigned_subgraph__get_nodes(&self) -> EpAssignedSubgraph_GetNodesFn {
-        self.f(IDX_EP_ASSIGNED_SUBGRAPH__GET_NODES)
+        unsafe { self.f(IDX_EP_ASSIGNED_SUBGRAPH__GET_NODES) }
     }
 }
 
@@ -4558,7 +4564,7 @@ pub type EpAssignedNode_GetNameFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn ep_assigned_node__get_name(&self) -> EpAssignedNode_GetNameFn {
-        self.f(IDX_EP_ASSIGNED_NODE__GET_NAME)
+        unsafe { self.f(IDX_EP_ASSIGNED_NODE__GET_NAME) }
     }
 }
 
@@ -4571,7 +4577,7 @@ pub type EpAssignedNode_GetDomainFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn ep_assigned_node__get_domain(&self) -> EpAssignedNode_GetDomainFn {
-        self.f(IDX_EP_ASSIGNED_NODE__GET_DOMAIN)
+        unsafe { self.f(IDX_EP_ASSIGNED_NODE__GET_DOMAIN) }
     }
 }
 
@@ -4584,7 +4590,7 @@ pub type EpAssignedNode_GetOperatorTypeFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn ep_assigned_node__get_operator_type(&self) -> EpAssignedNode_GetOperatorTypeFn {
-        self.f(IDX_EP_ASSIGNED_NODE__GET_OPERATOR_TYPE)
+        unsafe { self.f(IDX_EP_ASSIGNED_NODE__GET_OPERATOR_TYPE) }
     }
 }
 
@@ -4595,7 +4601,7 @@ pub type RunOptionsSetSyncStreamFn =
 impl Api {
     #[inline]
     pub unsafe fn run_options_set_sync_stream(&self) -> RunOptionsSetSyncStreamFn {
-        self.f(IDX_RUN_OPTIONS_SET_SYNC_STREAM)
+        unsafe { self.f(IDX_RUN_OPTIONS_SET_SYNC_STREAM) }
     }
 }
 
@@ -4612,7 +4618,7 @@ impl Api {
     pub unsafe fn get_tensor_element_type_and_shape_data_reference(
         &self,
     ) -> GetTensorElementTypeAndShapeDataReferenceFn {
-        self.f(IDX_GET_TENSOR_ELEMENT_TYPE_AND_SHAPE_DATA_REFERENCE)
+        unsafe { self.f(IDX_GET_TENSOR_ELEMENT_TYPE_AND_SHAPE_DATA_REFERENCE) }
     }
 }
 
@@ -4625,7 +4631,7 @@ pub type RunOptionsEnableProfilingFn = unsafe extern "C" fn(
 impl Api {
     #[inline]
     pub unsafe fn run_options_enable_profiling(&self) -> RunOptionsEnableProfilingFn {
-        self.f(IDX_RUN_OPTIONS_ENABLE_PROFILING)
+        unsafe { self.f(IDX_RUN_OPTIONS_ENABLE_PROFILING) }
     }
 }
 
@@ -4636,7 +4642,7 @@ pub type RunOptionsDisableProfilingFn =
 impl Api {
     #[inline]
     pub unsafe fn run_options_disable_profiling(&self) -> RunOptionsDisableProfilingFn {
-        self.f(IDX_RUN_OPTIONS_DISABLE_PROFILING)
+        unsafe { self.f(IDX_RUN_OPTIONS_DISABLE_PROFILING) }
     }
 }
 
@@ -4651,7 +4657,46 @@ impl Api {
     pub unsafe fn set_per_session_thread_pool_callbacks(
         &self,
     ) -> SetPerSessionThreadPoolCallbacksFn {
-        self.f(IDX_SET_PER_SESSION_THREAD_POOL_CALLBACKS)
+        unsafe { self.f(IDX_SET_PER_SESSION_THREAD_POOL_CALLBACKS) }
+    }
+}
+
+// OrtStatusPtr(* GetMemPatternEnabled)( const OrtSessionOptions* options, int* out) __attribute__((warn_unused_result))
+pub const IDX_GET_MEM_PATTERN_ENABLED: usize = 419;
+pub type GetMemPatternEnabledFn = unsafe extern "C" fn(
+    options: *const SessionOptionsHandle,
+    out_: *mut core::ffi::c_int,
+) -> StatusPtr;
+impl Api {
+    #[inline]
+    pub unsafe fn get_mem_pattern_enabled(&self) -> GetMemPatternEnabledFn {
+        unsafe { self.f(IDX_GET_MEM_PATTERN_ENABLED) }
+    }
+}
+
+// OrtStatusPtr(* GetSessionExecutionMode)( const OrtSessionOptions* options, ExecutionMode* out) __attribute__((warn_unused_result))
+pub const IDX_GET_SESSION_EXECUTION_MODE: usize = 420;
+pub type GetSessionExecutionModeFn = unsafe extern "C" fn(
+    options: *const SessionOptionsHandle,
+    out_: *mut ExecutionMode,
+) -> StatusPtr;
+impl Api {
+    #[inline]
+    pub unsafe fn get_session_execution_mode(&self) -> GetSessionExecutionModeFn {
+        unsafe { self.f(IDX_GET_SESSION_EXECUTION_MODE) }
+    }
+}
+
+// OrtStatusPtr(* SessionReleaseCapturedGraph)( OrtSession* session, int graph_annotation_id) __attribute__((warn_unused_result))
+pub const IDX_SESSION_RELEASE_CAPTURED_GRAPH: usize = 421;
+pub type SessionReleaseCapturedGraphFn = unsafe extern "C" fn(
+    session: *mut SessionHandle,
+    graph_annotation_id: core::ffi::c_int,
+) -> StatusPtr;
+impl Api {
+    #[inline]
+    pub unsafe fn session_release_captured_graph(&self) -> SessionReleaseCapturedGraphFn {
+        unsafe { self.f(IDX_SESSION_RELEASE_CAPTURED_GRAPH) }
     }
 }
 
@@ -4669,7 +4714,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn custom_op_domain__add(&self) -> CustomOpDomain_AddFn {
-        self.f(IDX_CUSTOM_OP_DOMAIN__ADD)
+        unsafe { self.f(IDX_CUSTOM_OP_DOMAIN__ADD) }
     }
 }
 
@@ -4687,7 +4732,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info_get_attribute_float(&self) -> KernelInfoGetAttribute_floatFn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_FLOAT)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_FLOAT) }
     }
 }
 
@@ -4705,7 +4750,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info_get_attribute_int64(&self) -> KernelInfoGetAttribute_int64Fn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_INT64)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_INT64) }
     }
 }
 
@@ -4724,7 +4769,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info_get_attribute_string(&self) -> KernelInfoGetAttribute_stringFn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_STRING)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_STRING) }
     }
 }
 
@@ -4739,7 +4784,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_input_count(&self) -> KernelContext_GetInputCountFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_INPUT_COUNT)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_INPUT_COUNT) }
     }
 }
 
@@ -4754,7 +4799,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_output_count(&self) -> KernelContext_GetOutputCountFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_OUTPUT_COUNT)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_OUTPUT_COUNT) }
     }
 }
 
@@ -4772,7 +4817,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_input(&self) -> KernelContext_GetInputFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_INPUT)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_INPUT) }
     }
 }
 
@@ -4792,7 +4837,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_output(&self) -> KernelContext_GetOutputFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_OUTPUT)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_OUTPUT) }
     }
 }
 
@@ -4813,7 +4858,7 @@ impl Api {
     pub unsafe fn kernel_info_get_attribute_array_float(
         &self,
     ) -> KernelInfoGetAttributeArray_floatFn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_FLOAT)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_FLOAT) }
     }
 }
 
@@ -4834,7 +4879,7 @@ impl Api {
     pub unsafe fn kernel_info_get_attribute_array_int64(
         &self,
     ) -> KernelInfoGetAttributeArray_int64Fn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_INT64)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_INT64) }
     }
 }
 
@@ -4853,21 +4898,21 @@ impl Api {
     pub unsafe fn kernel_context__get_gpu_compute_stream(
         &self,
     ) -> KernelContext_GetGpuComputeStreamFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_GPU_COMPUTE_STREAM)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_GPU_COMPUTE_STREAM) }
     }
 }
 
 // void( * ReleaseOpAttr)( OrtOpAttr * input)
-#[cfg(any(feature = "custom-ops", feature = "model-editor"))]
+#[cfg(feature = "custom-ops")]
 pub const IDX_RELEASE_OP_ATTR: usize = 212;
-#[cfg(any(feature = "custom-ops", feature = "model-editor"))]
+#[cfg(feature = "custom-ops")]
 pub type ReleaseOpAttrFn = unsafe extern "C" fn(input: *mut OpAttrHandle) -> ();
-#[cfg(any(feature = "custom-ops", feature = "model-editor"))]
+#[cfg(feature = "custom-ops")]
 impl Api {
     #[inline]
-    #[cfg(any(feature = "custom-ops", feature = "model-editor"))]
+    #[cfg(feature = "custom-ops")]
     pub unsafe fn release_op_attr(&self) -> ReleaseOpAttrFn {
-        self.f(IDX_RELEASE_OP_ATTR)
+        unsafe { self.f(IDX_RELEASE_OP_ATTR) }
     }
 }
 
@@ -4894,7 +4939,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn create_op(&self) -> CreateOpFn {
-        self.f(IDX_CREATE_OP)
+        unsafe { self.f(IDX_CREATE_OP) }
     }
 }
 
@@ -4908,7 +4953,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn release_op(&self) -> ReleaseOpFn {
-        self.f(IDX_RELEASE_OP)
+        unsafe { self.f(IDX_RELEASE_OP) }
     }
 }
 
@@ -4922,7 +4967,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn release_kernel_info(&self) -> ReleaseKernelInfoFn {
-        self.f(IDX_RELEASE_KERNEL_INFO)
+        unsafe { self.f(IDX_RELEASE_KERNEL_INFO) }
     }
 }
 
@@ -4937,7 +4982,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_input_count(&self) -> KernelInfo_GetInputCountFn {
-        self.f(IDX_KERNEL_INFO__GET_INPUT_COUNT)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_INPUT_COUNT) }
     }
 }
 
@@ -4952,7 +4997,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_output_count(&self) -> KernelInfo_GetOutputCountFn {
-        self.f(IDX_KERNEL_INFO__GET_OUTPUT_COUNT)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_OUTPUT_COUNT) }
     }
 }
 
@@ -4971,7 +5016,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_input_name(&self) -> KernelInfo_GetInputNameFn {
-        self.f(IDX_KERNEL_INFO__GET_INPUT_NAME)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_INPUT_NAME) }
     }
 }
 
@@ -4990,7 +5035,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_output_name(&self) -> KernelInfo_GetOutputNameFn {
-        self.f(IDX_KERNEL_INFO__GET_OUTPUT_NAME)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_OUTPUT_NAME) }
     }
 }
 
@@ -5008,7 +5053,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_input_type_info(&self) -> KernelInfo_GetInputTypeInfoFn {
-        self.f(IDX_KERNEL_INFO__GET_INPUT_TYPE_INFO)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_INPUT_TYPE_INFO) }
     }
 }
 
@@ -5026,7 +5071,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_output_type_info(&self) -> KernelInfo_GetOutputTypeInfoFn {
-        self.f(IDX_KERNEL_INFO__GET_OUTPUT_TYPE_INFO)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_OUTPUT_TYPE_INFO) }
     }
 }
 
@@ -5045,7 +5090,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info_get_attribute_tensor(&self) -> KernelInfoGetAttribute_tensorFn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_TENSOR)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_TENSOR) }
     }
 }
 
@@ -5063,7 +5108,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_node_name(&self) -> KernelInfo_GetNodeNameFn {
-        self.f(IDX_KERNEL_INFO__GET_NODE_NAME)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_NODE_NAME) }
     }
 }
 
@@ -5080,7 +5125,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_logger(&self) -> KernelInfo_GetLoggerFn {
-        self.f(IDX_KERNEL_INFO__GET_LOGGER)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_LOGGER) }
     }
 }
 
@@ -5097,7 +5142,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_logger(&self) -> KernelContext_GetLoggerFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_LOGGER)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_LOGGER) }
     }
 }
 
@@ -5118,7 +5163,7 @@ impl Api {
     pub unsafe fn kernel_info_get_constant_input_tensor(
         &self,
     ) -> KernelInfoGetConstantInput_tensorFn {
-        self.f(IDX_KERNEL_INFO_GET_CONSTANT_INPUT_TENSOR)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_CONSTANT_INPUT_TENSOR) }
     }
 }
 
@@ -5136,7 +5181,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_allocator(&self) -> KernelContext_GetAllocatorFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_ALLOCATOR)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_ALLOCATOR) }
     }
 }
 
@@ -5155,7 +5200,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_resource(&self) -> KernelContext_GetResourceFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_RESOURCE)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_RESOURCE) }
     }
 }
 
@@ -5175,7 +5220,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__parallel_for(&self) -> KernelContext_ParallelForFn {
-        self.f(IDX_KERNEL_CONTEXT__PARALLEL_FOR)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__PARALLEL_FOR) }
     }
 }
 
@@ -5194,7 +5239,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_context__get_scratch_buffer(&self) -> KernelContext_GetScratchBufferFn {
-        self.f(IDX_KERNEL_CONTEXT__GET_SCRATCH_BUFFER)
+        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_SCRATCH_BUFFER) }
     }
 }
 
@@ -5212,7 +5257,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info_get_allocator(&self) -> KernelInfoGetAllocatorFn {
-        self.f(IDX_KERNEL_INFO_GET_ALLOCATOR)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ALLOCATOR) }
     }
 }
 
@@ -5229,7 +5274,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_config_entries(&self) -> KernelInfo_GetConfigEntriesFn {
-        self.f(IDX_KERNEL_INFO__GET_CONFIG_ENTRIES)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_CONFIG_ENTRIES) }
     }
 }
 
@@ -5247,7 +5292,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_operator_domain(&self) -> KernelInfo_GetOperatorDomainFn {
-        self.f(IDX_KERNEL_INFO__GET_OPERATOR_DOMAIN)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_OPERATOR_DOMAIN) }
     }
 }
 
@@ -5265,7 +5310,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "custom-ops")]
     pub unsafe fn kernel_info__get_operator_type(&self) -> KernelInfo_GetOperatorTypeFn {
-        self.f(IDX_KERNEL_INFO__GET_OPERATOR_TYPE)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_OPERATOR_TYPE) }
     }
 }
 
@@ -5284,7 +5329,7 @@ impl Api {
     pub unsafe fn kernel_info__get_operator_since_version(
         &self,
     ) -> KernelInfo_GetOperatorSinceVersionFn {
-        self.f(IDX_KERNEL_INFO__GET_OPERATOR_SINCE_VERSION)
+        unsafe { self.f(IDX_KERNEL_INFO__GET_OPERATOR_SINCE_VERSION) }
     }
 }
 
@@ -5306,7 +5351,7 @@ impl Api {
     pub unsafe fn kernel_info_get_attribute_array_string(
         &self,
     ) -> KernelInfoGetAttributeArray_stringFn {
-        self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_STRING)
+        unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_STRING) }
     }
 }
 
@@ -5326,7 +5371,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider_cuda(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_cudaFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_CUDA)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_CUDA) }
     }
 }
 
@@ -5345,7 +5390,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider_rocm(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_rocmFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_ROCM)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_ROCM) }
     }
 }
 
@@ -5364,7 +5409,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider__open_vino(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_OpenVinoFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__OPEN_VINO)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__OPEN_VINO) }
     }
 }
 
@@ -5383,7 +5428,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider__tensor_rt(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_TensorRtFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__TENSOR_RT)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__TENSOR_RT) }
     }
 }
 
@@ -5402,7 +5447,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider__tensor_rt_v2(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_TensorRt_v2Fn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__TENSOR_RT_V2)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__TENSOR_RT_V2) }
     }
 }
 
@@ -5417,7 +5462,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn create_tensor_rt_provider_options(&self) -> CreateTensorRtProviderOptionsFn {
-        self.f(IDX_CREATE_TENSOR_RT_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_CREATE_TENSOR_RT_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5436,7 +5481,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn update_tensor_rt_provider_options(&self) -> UpdateTensorRtProviderOptionsFn {
-        self.f(IDX_UPDATE_TENSOR_RT_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_UPDATE_TENSOR_RT_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5456,7 +5501,7 @@ impl Api {
     pub unsafe fn get_tensor_rt_provider_options_as_string(
         &self,
     ) -> GetTensorRtProviderOptionsAsStringFn {
-        self.f(IDX_GET_TENSOR_RT_PROVIDER_OPTIONS_AS_STRING)
+        unsafe { self.f(IDX_GET_TENSOR_RT_PROVIDER_OPTIONS_AS_STRING) }
     }
 }
 
@@ -5471,7 +5516,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn release_tensor_rt_provider_options(&self) -> ReleaseTensorRtProviderOptionsFn {
-        self.f(IDX_RELEASE_TENSOR_RT_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_TENSOR_RT_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5490,7 +5535,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider_cuda_v2(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_cuda_v2Fn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_CUDA_V2)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_CUDA_V2) }
     }
 }
 
@@ -5505,7 +5550,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn create_cuda_provider_options(&self) -> CreateCudaProviderOptionsFn {
-        self.f(IDX_CREATE_CUDA_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_CREATE_CUDA_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5524,7 +5569,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn update_cuda_provider_options(&self) -> UpdateCudaProviderOptionsFn {
-        self.f(IDX_UPDATE_CUDA_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_UPDATE_CUDA_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5542,7 +5587,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn get_cuda_provider_options_as_string(&self) -> GetCudaProviderOptionsAsStringFn {
-        self.f(IDX_GET_CUDA_PROVIDER_OPTIONS_AS_STRING)
+        unsafe { self.f(IDX_GET_CUDA_PROVIDER_OPTIONS_AS_STRING) }
     }
 }
 
@@ -5557,7 +5602,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn release_cuda_provider_options(&self) -> ReleaseCudaProviderOptionsFn {
-        self.f(IDX_RELEASE_CUDA_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_CUDA_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5576,7 +5621,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider_mi_graph_x(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_miGraphXFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_MI_GRAPH_X)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_MI_GRAPH_X) }
     }
 }
 
@@ -5595,7 +5640,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider_cann(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_cannFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_CANN)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER_CANN) }
     }
 }
 
@@ -5610,7 +5655,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn create_cann_provider_options(&self) -> CreateCannProviderOptionsFn {
-        self.f(IDX_CREATE_CANN_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_CREATE_CANN_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5629,7 +5674,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn update_cann_provider_options(&self) -> UpdateCannProviderOptionsFn {
-        self.f(IDX_UPDATE_CANN_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_UPDATE_CANN_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5647,7 +5692,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn get_cann_provider_options_as_string(&self) -> GetCannProviderOptionsAsStringFn {
-        self.f(IDX_GET_CANN_PROVIDER_OPTIONS_AS_STRING)
+        unsafe { self.f(IDX_GET_CANN_PROVIDER_OPTIONS_AS_STRING) }
     }
 }
 
@@ -5662,7 +5707,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn release_cann_provider_options(&self) -> ReleaseCannProviderOptionsFn {
-        self.f(IDX_RELEASE_CANN_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_CANN_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5681,7 +5726,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider__dnnl(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_DnnlFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__DNNL)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__DNNL) }
     }
 }
 
@@ -5696,7 +5741,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn create_dnnl_provider_options(&self) -> CreateDnnlProviderOptionsFn {
-        self.f(IDX_CREATE_DNNL_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_CREATE_DNNL_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5715,7 +5760,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn update_dnnl_provider_options(&self) -> UpdateDnnlProviderOptionsFn {
-        self.f(IDX_UPDATE_DNNL_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_UPDATE_DNNL_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5733,7 +5778,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn get_dnnl_provider_options_as_string(&self) -> GetDnnlProviderOptionsAsStringFn {
-        self.f(IDX_GET_DNNL_PROVIDER_OPTIONS_AS_STRING)
+        unsafe { self.f(IDX_GET_DNNL_PROVIDER_OPTIONS_AS_STRING) }
     }
 }
 
@@ -5748,7 +5793,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn release_dnnl_provider_options(&self) -> ReleaseDnnlProviderOptionsFn {
-        self.f(IDX_RELEASE_DNNL_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_DNNL_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5763,7 +5808,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn create_rocm_provider_options(&self) -> CreateRocmProviderOptionsFn {
-        self.f(IDX_CREATE_ROCM_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_CREATE_ROCM_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5782,7 +5827,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn update_rocm_provider_options(&self) -> UpdateRocmProviderOptionsFn {
-        self.f(IDX_UPDATE_ROCM_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_UPDATE_ROCM_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5800,7 +5845,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn get_rocm_provider_options_as_string(&self) -> GetRocmProviderOptionsAsStringFn {
-        self.f(IDX_GET_ROCM_PROVIDER_OPTIONS_AS_STRING)
+        unsafe { self.f(IDX_GET_ROCM_PROVIDER_OPTIONS_AS_STRING) }
     }
 }
 
@@ -5815,7 +5860,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn release_rocm_provider_options(&self) -> ReleaseRocmProviderOptionsFn {
-        self.f(IDX_RELEASE_ROCM_PROVIDER_OPTIONS)
+        unsafe { self.f(IDX_RELEASE_ROCM_PROVIDER_OPTIONS) }
     }
 }
 
@@ -5835,7 +5880,7 @@ impl Api {
     pub unsafe fn update_tensor_rt_provider_options_with_value(
         &self,
     ) -> UpdateTensorRtProviderOptionsWithValueFn {
-        self.f(IDX_UPDATE_TENSOR_RT_PROVIDER_OPTIONS_WITH_VALUE)
+        unsafe { self.f(IDX_UPDATE_TENSOR_RT_PROVIDER_OPTIONS_WITH_VALUE) }
     }
 }
 
@@ -5855,7 +5900,7 @@ impl Api {
     pub unsafe fn get_tensor_rt_provider_options_by_name(
         &self,
     ) -> GetTensorRtProviderOptionsByNameFn {
-        self.f(IDX_GET_TENSOR_RT_PROVIDER_OPTIONS_BY_NAME)
+        unsafe { self.f(IDX_GET_TENSOR_RT_PROVIDER_OPTIONS_BY_NAME) }
     }
 }
 
@@ -5875,7 +5920,7 @@ impl Api {
     pub unsafe fn update_cuda_provider_options_with_value(
         &self,
     ) -> UpdateCudaProviderOptionsWithValueFn {
-        self.f(IDX_UPDATE_CUDA_PROVIDER_OPTIONS_WITH_VALUE)
+        unsafe { self.f(IDX_UPDATE_CUDA_PROVIDER_OPTIONS_WITH_VALUE) }
     }
 }
 
@@ -5893,7 +5938,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "ep")]
     pub unsafe fn get_cuda_provider_options_by_name(&self) -> GetCudaProviderOptionsByNameFn {
-        self.f(IDX_GET_CUDA_PROVIDER_OPTIONS_BY_NAME)
+        unsafe { self.f(IDX_GET_CUDA_PROVIDER_OPTIONS_BY_NAME) }
     }
 }
 
@@ -5914,7 +5959,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider__open_vino_v2(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_OpenVino_v2Fn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__OPEN_VINO_V2)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__OPEN_VINO_V2) }
     }
 }
 
@@ -5935,7 +5980,7 @@ impl Api {
     pub unsafe fn session_options_append_execution_provider__vitis_ai(
         &self,
     ) -> SessionOptionsAppendExecutionProvider_VitisAiFn {
-        self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__VITIS_AI)
+        unsafe { self.f(IDX_SESSION_OPTIONS_APPEND_EXECUTION_PROVIDER__VITIS_AI) }
     }
 }
 
@@ -5950,7 +5995,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "model-editor")]
     pub unsafe fn get_model_editor_api(&self) -> GetModelEditorApiFn {
-        self.f(IDX_GET_MODEL_EDITOR_API)
+        unsafe { self.f(IDX_GET_MODEL_EDITOR_API) }
     }
 }
 
@@ -5964,7 +6009,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "model-editor")]
     pub unsafe fn get_compile_api(&self) -> GetCompileApiFn {
-        self.f(IDX_GET_COMPILE_API)
+        unsafe { self.f(IDX_GET_COMPILE_API) }
     }
 }
 
@@ -5978,7 +6023,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "model-editor")]
     pub unsafe fn get_ep_api(&self) -> GetEpApiFn {
-        self.f(IDX_GET_EP_API)
+        unsafe { self.f(IDX_GET_EP_API) }
     }
 }
 
@@ -5992,7 +6037,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "model-editor")]
     pub unsafe fn get_interop_api(&self) -> GetInteropApiFn {
-        self.f(IDX_GET_INTEROP_API)
+        unsafe { self.f(IDX_GET_INTEROP_API) }
     }
 }
 
@@ -6007,7 +6052,7 @@ impl Api {
     #[inline]
     #[cfg(feature = "training")]
     pub unsafe fn get_training_api(&self) -> GetTrainingApiFn {
-        self.f(IDX_GET_TRAINING_API)
+        unsafe { self.f(IDX_GET_TRAINING_API) }
     }
 }
 
@@ -6257,7 +6302,7 @@ pub struct InteropApi {
     pub CanImportMemory: Option<
         unsafe extern "C" fn(
             importer: *const ExternalResourceImporterHandle,
-            handle_type: ExternalMemoryHandleTypeHandle,
+            handle_type: i32,
             out_supported: *mut bool,
         ) -> StatusPtr,
     >,
@@ -6281,7 +6326,7 @@ pub struct InteropApi {
     pub CanImportSemaphore: Option<
         unsafe extern "C" fn(
             importer: *const ExternalResourceImporterHandle,
-            type_: ExternalSemaphoreTypeHandle,
+            type_: i32,
             out_supported: *mut bool,
         ) -> StatusPtr,
     >,
@@ -6363,11 +6408,8 @@ pub struct EpApi {
     pub MemoryDevice_AreEqual: Option<
         unsafe extern "C" fn(a: *const MemoryDeviceHandle, b: *const MemoryDeviceHandle) -> bool,
     >,
-    pub MemoryDevice_GetDeviceType: Option<
-        unsafe extern "C" fn(
-            memory_device: *const MemoryDeviceHandle,
-        ) -> MemoryInfoDeviceTypeHandle,
-    >,
+    pub MemoryDevice_GetDeviceType:
+        Option<unsafe extern "C" fn(memory_device: *const MemoryDeviceHandle) -> i32>,
     pub MemoryDevice_GetMemoryType:
         Option<unsafe extern "C" fn(memory_device: *const MemoryDeviceHandle) -> i32>,
     pub MemoryDevice_GetVendorId:

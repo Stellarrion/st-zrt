@@ -4,7 +4,7 @@
 //! The ORT `SessionOptions` handle is materialized once, inside [`crate::Session::new`],
 //! via [`SessionOptions::build_handle`]. This is the foundation for a future auto
 //! thread-policy (the config can carry a policy before any handle exists).
-use crate::{api, check, sys, Result};
+use crate::{Result, api, check, sys};
 use std::ffi::CString;
 use std::ptr;
 
@@ -61,6 +61,10 @@ pub struct SessionOptions {
     pub(crate) free_dimension_overrides_by_name: Vec<(CString, i64)>,
     #[cfg_attr(feature = "serde", serde(with = "crate::serde_support::kv_pairs"))]
     pub(crate) config_entries: Vec<(CString, CString)>,
+    /// Automatic execution-provider selection policy (feature `ep`). Applied in `build_handle`.
+    #[cfg(feature = "ep")]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub(crate) ep_selection_policy: Option<sys::ExecutionProviderDevicePolicy>,
     /// Queued execution-provider appends (feature `ep`). Applied in `build_handle`.
     #[cfg(feature = "ep")]
     pub(crate) ep_configs: Vec<crate::ep::EpConfig>,
@@ -105,6 +109,8 @@ impl Default for SessionOptions {
             free_dimension_overrides: Vec::new(),
             free_dimension_overrides_by_name: Vec::new(),
             config_entries: Vec::new(),
+            #[cfg(feature = "ep")]
+            ep_selection_policy: None,
             #[cfg(feature = "ep")]
             ep_configs: Vec::new(),
             #[cfg(feature = "ep")]
@@ -314,6 +320,14 @@ impl SessionOptions {
         Ok(self)
     }
 
+    /// Set ORT's automatic execution-provider device-selection policy.
+    #[cfg(feature = "ep")]
+    #[inline]
+    pub fn with_ep_selection_policy(mut self, policy: sys::ExecutionProviderDevicePolicy) -> Self {
+        self.ep_selection_policy = Some(policy);
+        self
+    }
+
     /// Materialize an ORT `SessionOptions` handle from this config. The caller owns
     /// and must release the returned handle (`CreateSession` copies the options).
     pub(crate) fn build_handle(&self) -> Result<*mut sys::SessionOptionsHandle> {
@@ -370,6 +384,10 @@ impl SessionOptions {
                 check(unsafe { api.add_session_config_entry()(opts, k.as_ptr(), v.as_ptr()) })?;
             }
             #[cfg(feature = "ep")]
+            if let Some(policy) = self.ep_selection_policy {
+                check(unsafe { api.session_options_set_ep_selection_policy()(opts, policy) })?;
+            }
+            #[cfg(feature = "ep")]
             for cfg in &self.ep_configs {
                 crate::ep::apply(opts, cfg)?;
             }
@@ -396,11 +414,7 @@ impl SessionOptions {
 
 #[inline]
 fn bool_config_value(enabled: bool) -> &'static str {
-    if enabled {
-        "1"
-    } else {
-        "0"
-    }
+    if enabled { "1" } else { "0" }
 }
 
 #[cfg(test)]
@@ -428,6 +442,18 @@ mod tests {
             .expect("inter spin");
 
         let h = opts.build_handle().expect("advanced options handle");
+        unsafe {
+            api().release_session_options()(h);
+        }
+    }
+
+    #[cfg(feature = "ep")]
+    #[test]
+    fn ep_selection_policy_reaches_ffi() {
+        let opts = SessionOptions::new()
+            .with_ep_selection_policy(sys::ExecutionProviderDevicePolicy::Default);
+
+        let h = opts.build_handle().expect("ep selection policy handle");
         unsafe {
             api().release_session_options()(h);
         }

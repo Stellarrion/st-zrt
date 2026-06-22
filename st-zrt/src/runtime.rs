@@ -10,7 +10,7 @@ use crate::environment::Environment;
 use crate::io_binding::IoBinding;
 use crate::memory::MemoryInfo;
 use crate::prepacked::PrepackedWeightsContainer;
-use crate::session::{lane_tensor_buffer, LaneBufferPolicy, Session};
+use crate::session::{LaneBufferPolicy, Session, lane_tensor_buffer};
 use crate::session_options::SessionOptions;
 use crate::tensor::TensorBuffer;
 use crate::{Error, Result};

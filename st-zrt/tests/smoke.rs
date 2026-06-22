@@ -6,11 +6,11 @@
 //! Tensor::from_buffer (zero-copy input) → run → OwnedValue::as_slice (zero-copy output).
 
 use st_zrt::{
-    sys, Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, DynamicIoOptions,
-    DynamicIoRuntime, Environment, GraphOptimizationLevel, IoBinding, LaneBufferPolicy,
-    LoggingLevel, MemType, MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
+    Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, DynamicIoOptions, DynamicIoRuntime,
+    Environment, GraphOptimizationLevel, IoBinding, LaneBufferPolicy, LoggingLevel, MemType,
+    MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
     PrepackedWeightsContainer, RunOptions, Runtime, RuntimeMode, Session, SessionOptions,
-    StaticIoLane, StaticIoRuntime, Tensor, TensorBuffer,
+    StaticIoLane, StaticIoRuntime, Tensor, TensorBuffer, sys,
 };
 use std::sync::Arc;
 
@@ -108,9 +108,10 @@ fn public_misuse_returns_errors_not_panics() {
     assert!(sess.run(&[], &mut outputs).is_err());
     assert!(sess.prepare_run(&[]).is_err());
     assert!(sess.run(&[&input], &mut []).is_err());
-    assert!(sess
-        .prepare_tensor_io_lane::<f32>(&mem, &[], &[&[1, 10]])
-        .is_err());
+    assert!(
+        sess.prepare_tensor_io_lane::<f32>(&mem, &[], &[&[1, 10]])
+            .is_err()
+    );
     assert!(sess.input_name(sess.input_count()).is_err());
     assert!(sess.output_name(sess.output_count()).is_err());
     assert!(sess.input_meta(sess.input_count()).is_err());

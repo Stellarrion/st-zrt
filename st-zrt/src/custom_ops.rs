@@ -25,8 +25,8 @@ use crate::allocator::Allocator;
 use crate::memory::MemoryInfo;
 use crate::session_options::SessionOptions;
 use crate::tensor::TensorView;
-use crate::{api, check, sys, Error, Result};
-use std::ffi::{c_char, c_int, c_void, CString};
+use crate::{Error, Result, api, check, sys};
+use std::ffi::{CString, c_char, c_int, c_void};
 use std::marker::PhantomData;
 use std::ptr;
 
@@ -39,14 +39,16 @@ use std::ptr;
 unsafe fn fetch_sized_string(
     fill: impl Fn(*mut c_char, *mut usize) -> sys::StatusPtr,
 ) -> Result<String> {
-    let mut size: usize = 0;
-    let probe = fill(ptr::null_mut(), &mut size);
-    if !probe.is_null() {
-        api().release_status()(probe);
+    unsafe {
+        let mut size: usize = 0;
+        let probe = fill(ptr::null_mut(), &mut size);
+        if !probe.is_null() {
+            api().release_status()(probe);
+        }
+        let mut buf = vec![0u8; size];
+        check(fill(buf.as_mut_ptr() as *mut c_char, &mut size))?;
+        trim_nul(&buf, size)
     }
-    let mut buf = vec![0u8; size];
-    check(fill(buf.as_mut_ptr() as *mut c_char, &mut size))?;
-    trim_nul(&buf, size)
 }
 
 /// Fetch a fixed-size pod array (`f32`/`i64`) via the same two-call pattern. The probe
@@ -54,14 +56,16 @@ unsafe fn fetch_sized_string(
 unsafe fn fetch_sized_array<T: Copy + Default>(
     fill: impl Fn(*mut T, *mut usize) -> sys::StatusPtr,
 ) -> Result<Vec<T>> {
-    let mut count: usize = 0;
-    let probe = fill(ptr::null_mut(), &mut count);
-    if !probe.is_null() {
-        api().release_status()(probe);
+    unsafe {
+        let mut count: usize = 0;
+        let probe = fill(ptr::null_mut(), &mut count);
+        if !probe.is_null() {
+            api().release_status()(probe);
+        }
+        let mut buf = vec![T::default(); count];
+        check(fill(buf.as_mut_ptr(), &mut count))?;
+        Ok(buf)
     }
-    let mut buf = vec![T::default(); count];
-    check(fill(buf.as_mut_ptr(), &mut count))?;
-    Ok(buf)
 }
 
 /// Decode `buf[..size]` as UTF-8, dropping a single trailing NUL if present.
@@ -242,7 +246,7 @@ impl CustomOpDomain {
     /// field set to `ORT_API_VERSION` and the callbacks ORT will read populated), and it
     /// must remain valid until this domain is released.
     pub unsafe fn add_raw(&self, op: *const sys::CustomOpHandle) -> Result<()> {
-        check(api().custom_op_domain__add()(self.ptr, op))
+        unsafe { check(api().custom_op_domain__add()(self.ptr, op)) }
     }
 
     /// Register a custom op whose vtable was built by the [`custom_op!`](crate::custom_op)
@@ -782,8 +786,10 @@ unsafe extern "C" fn parallel_for_trampoline<F>(data: *mut c_void, index: usize)
 where
     F: Fn(usize) + Send + Sync,
 {
-    if !data.is_null() {
-        (&*(data as *const F))(index);
+    unsafe {
+        if !data.is_null() {
+            (&*(data as *const F))(index);
+        }
     }
 }
 
@@ -951,8 +957,8 @@ unsafe impl Sync for Op {}
 #[doc(hidden)]
 pub mod __priv {
     use super::{CustomOp, KernelContext, KernelInfo, ShapeInferContext};
-    use crate::{api, sys, Error};
-    use std::ffi::{c_char, c_void, CString};
+    use crate::{Error, api, sys};
+    use std::ffi::{CString, c_char, c_void};
     use std::os::raw::c_int;
     use std::panic::AssertUnwindSafe;
     use std::ptr;

@@ -6,8 +6,8 @@ members = ["st-zrt-sys", "st-zrt", "codegen"]
 # share a Cargo graph. Variant C benchmarks against st-zrt in a separate crate.
 
 [workspace.package]
-version = "0.1.1"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
 authors = ["Stellarrion"]

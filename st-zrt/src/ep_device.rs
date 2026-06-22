@@ -14,8 +14,8 @@
 //! `CreateEpDevice`, `EpGraphSupportInfo`, profiling events; ~67 fns) is for implementing a
 //! custom EP in C++/Rust. It is niche and untestable on a CPU host, so it is left at the
 //! [`crate::ep_api`] gateway.
-use crate::{api, check, sys, Result};
-use std::ffi::{c_char, CString};
+use crate::{Result, api, check, sys};
+use std::ffi::{CString, c_char};
 use std::ptr;
 
 /// Enumerate the EP devices registered with `env` (`GetEpDevices`). The returned [`EpDevice`]s
@@ -71,9 +71,6 @@ fn cstr_to_string(p: *const c_char) -> Result<String> {
     }
 }
 
-/// A queued EP-device attach — one or more (same-EP) [`EpDevice`]s + optional key/value
-/// options. Applied to a session-options handle by [`apply_device_attach`] at session creation.
-/// The device pointers are borrowed from the `Environment` (must outlive the session).
 /// A queued EP-device attach — one or more (same-EP) [`EpDevice`]s + optional key/value
 /// options. Applied to a session-options handle by [`apply_device_attach`] at session creation.
 /// The device pointers are borrowed from the `Environment` (must outlive the session).
