@@ -167,6 +167,11 @@ fn resolve_cuda13_lib_dir(target: &str) -> PathBuf {
 }
 
 fn main() {
+    if env::var_os("DOCS_RS").is_some() {
+        println!("cargo:rerun-if-env-changed=DOCS_RS");
+        return;
+    }
+
     let target = env::var("TARGET").unwrap_or_default();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let gpu = cfg!(feature = "cuda");

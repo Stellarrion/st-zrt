@@ -43,7 +43,7 @@ training = ["st-zrt-sys/training"]
 cuda = ["st-zrt-sys/cuda", "ep"]
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["half", "serde", "ep", "custom-ops", "model-editor", "training"]
 
 [[example]]
 name = "custom_op"
