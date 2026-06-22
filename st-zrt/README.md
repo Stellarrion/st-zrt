@@ -5,8 +5,8 @@ Safe, zero-overhead Rust runtime bindings for ONNX Runtime 1.27.
 `st-zrt` keeps ONNX Runtime as the kernel engine and focuses on the Rust boundary: zero-copy caller
 buffers, prepared fixed-shape I/O, explicit lane-based serving, sparse tensors, IoBinding,
 profiling, threading options, async runs, custom ops, CUDA/provider configuration, mmap-backed
-dense initializers, packed sub-byte raw byte access, session logging, and model-editor access
-behind feature gates.
+dense initializers, packed sub-byte raw byte access, session logging, placement diagnostics,
+explicit tensor copies, and model-editor access behind feature gates.
 
 ```rust
 use st_zrt::{
@@ -56,6 +56,28 @@ Reusable lanes bind inputs once by default for the CPU zero-allocation hot path.
 callers that mutate reusable CPU input buffers can opt into per-run input rebinding with
 `StaticIoLane::set_rebind_inputs_each_run(true)` or
 `DynamicIoOptions::with_rebind_inputs_each_run(true)`.
+
+Use `Session::io_placement()` to inspect ORT's planned input/output memory descriptors and
+assigned EP devices. Device-bound outputs can be wrapped in `DeviceValue` and copied explicitly to
+`TensorBuffer` or `AllocatedTensor` destinations through ORT `CopyTensors`.
+Placement and audit APIs are setup/preflight tools and may allocate; keep them outside the
+measured serving loop. Use `Session::run_array` for fixed-arity regular runs with stack-backed
+handle arrays, and prepared IoBinding or lane APIs for hard zero-copy output.
+
+For fixed dynamic-shape plans, prebuild and warm buckets before serving:
+`dynamic.prebuild_buckets([ShapeSpec::new([input_shape], [output_shape])])?;` followed by
+`dynamic.prime_cached_buckets(runs)?;`. For CUDA outputs that should stay device-resident, prefer
+`prepare_allocated_output_tensor_io_lane` with `MemoryInfo::cuda(device_id)` so stable
+`AllocatedTensor` outputs are bound once; `bind_output_device` plus `output_values()` remains the
+flexible inspection path, not the hard zero-allocation serving path.
+
+Latest local quick benchmarks, June 22, 2026, on the repository MNIST/relay models:
+`static_io_bind_once` p50 18.581 us / p99 22.671 us, `runtime/static_io_direct` 18.953 us,
+`runtime/dynamic_cached_run_on` 19.368 us, `C_lane` 19.107 us, 4 MiB relay lane 102.33 us, and
+16 MiB relay lane 706.89 us. Criterion reported no serving-path regressions after the 0.2.1
+caller-owned output, device-output, bucket prebuild, and warmup API additions. Unsynchronized runs
+remain opt-in: they improved some tail samples locally but did not beat synchronized bind-once
+median latency.
 
 The raw generated FFI lives in `st-zrt-sys`.
 

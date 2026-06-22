@@ -76,7 +76,7 @@ pub use interop::{
     deinit_graphics_interop_for_ep_device, init_graphics_interop_for_ep_device,
 };
 pub use io_binding::{IoBinding, OutputValue};
-pub use memory::{MemoryInfo, MemoryInfoSnapshot};
+pub use memory::{MemoryDeviceSnapshot, MemoryInfo, MemoryInfoSnapshot};
 pub use metadata::ModelMetadata;
 #[cfg(feature = "model-editor")]
 pub use model_editor::{
@@ -86,18 +86,19 @@ pub use model_editor::{
 pub use prepacked::PrepackedWeightsContainer;
 pub use run_options::RunOptions;
 pub use runtime::{
-    DynamicIoOptions, DynamicIoRuntime, Lane, Runtime, RuntimeMode, ShapeBucket, ShapeKey,
-    StaticIoLane, StaticIoRuntime,
+    DynamicIoOptions, DynamicIoRuntime, Lane, LaneHotPathAudit, Runtime, RuntimeMode, ShapeBucket,
+    ShapeKey, ShapeSpec, StaticIoLane, StaticIoRuntime, TensorBufferAudit,
 };
 pub use session::{
-    AllocatedOutputTensorIoLane, AllocatedTensorIoLane, DeviceOutputTensorIoLane, LaneBufferPolicy,
+    AllocatedOutputTensorIoLane, AllocatedTensorIoLane, DeviceOutputTensorIoLane,
+    ExecutionProviderDeviceSnapshot, IoDirection, IoPlacement, LaneBufferPolicy,
     LaneRunAllocatorStats, PreparedIoBinding, PreparedRun, RunFuture, Session, StaticTensorIoLane,
     TensorIoLane,
 };
 pub use session_options::{ArenaState, MemPatternState, SessionOptions};
 pub use tensor::{
-    AllocatedTensor, MmapTensorOptions, OwnedValue, RunInput, SparseTensor, StringTensor, Tensor,
-    TensorBuffer, TensorView,
+    AllocatedTensor, DeviceValue, MmapTensorOptions, OwnedValue, RunInput, SparseTensor,
+    StringTensor, Tensor, TensorBuffer, TensorView,
 };
 pub use threading::{ThreadManager, ThreadingOptions};
 pub use type_info::TensorTypeAndShapeInfo;

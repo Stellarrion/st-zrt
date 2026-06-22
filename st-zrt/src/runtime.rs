@@ -8,13 +8,83 @@
 use crate::element::TensorElement;
 use crate::environment::Environment;
 use crate::io_binding::IoBinding;
-use crate::memory::MemoryInfo;
+use crate::memory::{MemoryInfo, MemoryInfoSnapshot};
 use crate::prepacked::PrepackedWeightsContainer;
-use crate::session::{LaneBufferPolicy, Session, lane_tensor_buffer};
+use crate::session::{IoDirection, LaneBufferPolicy, Session, lane_tensor_buffer};
 use crate::session_options::SessionOptions;
 use crate::tensor::TensorBuffer;
 use crate::{Error, Result};
+use std::ffi::CString;
 use std::sync::Arc;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorBufferAudit {
+    pub direction: IoDirection,
+    pub index: usize,
+    pub element_type: crate::ElementType,
+    pub element_count: usize,
+    pub byte_len: usize,
+    pub rust_ptr: usize,
+    pub ort_ptr: usize,
+    pub pointer_identity: bool,
+    pub memory_info: MemoryInfoSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaneHotPathAudit {
+    pub input_count: usize,
+    pub output_count: usize,
+    pub rebind_inputs_each_run: bool,
+    pub input_names_cached: bool,
+    pub inputs: Vec<TensorBufferAudit>,
+    pub outputs: Vec<TensorBufferAudit>,
+}
+
+fn audit_tensor_buffer<T: TensorElement>(
+    direction: IoDirection, index: usize, buffer: &TensorBuffer<T>,
+) -> Result<TensorBufferAudit> {
+    let rust_ptr = buffer.as_slice().as_ptr() as usize;
+    let ort_ptr = buffer.engine_data_ptr()? as usize;
+    Ok(TensorBufferAudit {
+        direction,
+        index,
+        element_type: T::ELEM,
+        element_count: buffer.len(),
+        byte_len: buffer.byte_len()?,
+        rust_ptr,
+        ort_ptr,
+        pointer_identity: rust_ptr == ort_ptr,
+        memory_info: buffer.memory_info()?,
+    })
+}
+
+fn assert_tensor_buffer_zero_copy<T: TensorElement>(
+    what: &str, index: usize, buffer: &TensorBuffer<T>,
+) -> Result<()> {
+    let audit = audit_tensor_buffer(IoDirection::Input, index, buffer)?;
+    if !audit.pointer_identity {
+        return Err(Error::new(
+            -1,
+            format!(
+                "zrt: {what} {index} is not zero-copy: rust_ptr=0x{:x}, ort_ptr=0x{:x}",
+                audit.rust_ptr, audit.ort_ptr
+            ),
+        ));
+    }
+    if !audit.memory_info.is_host_accessible() {
+        return Err(Error::new(
+            -1,
+            format!(
+                "zrt: {what} {index} is not host-accessible: {} device {} ({:?}/{:?})",
+                audit.memory_info.name,
+                audit.memory_info.device_id,
+                audit.memory_info.alloc_type,
+                audit.memory_info.mem_type
+            ),
+        ));
+    }
+    Ok(())
+}
 
 /// How a [`Runtime`] may arrange ONNX Runtime sessions across lanes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +128,7 @@ pub struct StaticIoLane<
     binding: IoBinding,
     inputs: [TensorBuffer<I>; INPUTS],
     outputs: [TensorBuffer<O>; OUTPUTS],
+    input_names: [CString; INPUTS],
     session: Arc<Session>,
     rebind_inputs_each_run: bool,
 }
@@ -124,6 +195,15 @@ impl<T: TensorElement> Lane<T> {
         self.session.run_binding(&self.binding)
     }
 
+    /// Execute this lane without ORT bound-input/output synchronization calls.
+    ///
+    /// Use this only for fully host-resident bindings or when device stream synchronization is
+    /// handled by the caller. See [`Session::run_binding_unsynchronized`].
+    #[inline]
+    pub fn run_unsynchronized(&mut self) -> Result<()> {
+        self.session.run_binding_unsynchronized(&self.binding)
+    }
+
     /// Run this lane `runs` times before serving to prime ORT shape/memory caches.
     pub fn prime(&mut self, runs: usize) -> Result<()> {
         for _ in 0..runs {
@@ -181,6 +261,44 @@ impl<T: TensorElement> Lane<T> {
     #[inline]
     pub fn session(&self) -> &Session {
         &self.session
+    }
+
+    /// Snapshot this lane's hot-path pointer and placement plan.
+    ///
+    /// This is a setup/preflight diagnostic API and may allocate. Do not call it inside the
+    /// measured serving loop.
+    pub fn audit_hot_path(&self) -> Result<LaneHotPathAudit> {
+        let inputs = self
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| audit_tensor_buffer(IoDirection::Input, i, buffer))
+            .collect::<Result<Vec<_>>>()?;
+        let outputs = self
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| audit_tensor_buffer(IoDirection::Output, i, buffer))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(LaneHotPathAudit {
+            input_count: self.inputs.len(),
+            output_count: self.outputs.len(),
+            rebind_inputs_each_run: false,
+            input_names_cached: true,
+            inputs,
+            outputs,
+        })
+    }
+
+    /// Fail if this lane's buffers are not host-accessible pointer-identity zero-copy tensors.
+    pub fn assert_zero_copy_plan(&self) -> Result<()> {
+        for (i, input) in self.inputs.iter().enumerate() {
+            assert_tensor_buffer_zero_copy("lane input", i, input)?;
+        }
+        for (i, output) in self.outputs.iter().enumerate() {
+            assert_tensor_buffer_zero_copy("lane output", i, output)?;
+        }
+        Ok(())
     }
 }
 
@@ -262,8 +380,16 @@ where
             .map_err(|_| Error::new(-1, "zrt: failed to build static I/O output array"))?;
 
         let mut binding = IoBinding::new(&session)?;
+        let input_names: [CString; INPUTS] = (0..INPUTS)
+            .map(|i| {
+                CString::new(session.input_name(i)?)
+                    .map_err(|_| Error::new(-1, "zrt: input name contains a NUL"))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .try_into()
+            .map_err(|_| Error::new(-1, "zrt: failed to build static I/O input name array"))?;
         for (i, input) in inputs.iter().enumerate() {
-            binding.bind_input(session.input_name(i)?, input)?;
+            binding.bind_input_cstr(&input_names[i], input)?;
         }
         for (i, output) in outputs.iter().enumerate() {
             binding.bind_output_buffer(session.output_name(i)?, output)?;
@@ -273,6 +399,7 @@ where
             binding,
             inputs,
             outputs,
+            input_names,
             session,
             rebind_inputs_each_run: false,
         })
@@ -288,11 +415,26 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
         if self.rebind_inputs_each_run {
             self.binding.clear_inputs();
             for (i, input) in self.inputs.iter().enumerate() {
-                self.binding
-                    .bind_input(self.session.input_name(i)?, input)?;
+                self.binding.bind_input_cstr(&self.input_names[i], input)?;
             }
         }
         self.session.run_binding(&self.binding)
+    }
+
+    /// Execute this lane without ORT bound-input/output synchronization calls.
+    ///
+    /// If `rebind_inputs_each_run` is enabled, inputs are still rebound before the run. Use this
+    /// only for fully host-resident bindings or when device stream synchronization is handled by
+    /// the caller. See [`Session::run_binding_unsynchronized`].
+    #[inline]
+    pub fn run_unsynchronized(&mut self) -> Result<()> {
+        if self.rebind_inputs_each_run {
+            self.binding.clear_inputs();
+            for (i, input) in self.inputs.iter().enumerate() {
+                self.binding.bind_input_cstr(&self.input_names[i], input)?;
+            }
+        }
+        self.session.run_binding_unsynchronized(&self.binding)
     }
 
     /// Run this lane `runs` times before serving to prime ORT shape/memory caches.
@@ -420,6 +562,44 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
         &self.session
     }
 
+    /// Snapshot this static lane's hot-path pointer and placement plan.
+    ///
+    /// This is a setup/preflight diagnostic API and may allocate. Do not call it inside the
+    /// measured serving loop.
+    pub fn audit_hot_path(&self) -> Result<LaneHotPathAudit> {
+        let inputs = self
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| audit_tensor_buffer(IoDirection::Input, i, buffer))
+            .collect::<Result<Vec<_>>>()?;
+        let outputs = self
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| audit_tensor_buffer(IoDirection::Output, i, buffer))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(LaneHotPathAudit {
+            input_count: INPUTS,
+            output_count: OUTPUTS,
+            rebind_inputs_each_run: self.rebind_inputs_each_run,
+            input_names_cached: self.input_names.len() == INPUTS,
+            inputs,
+            outputs,
+        })
+    }
+
+    /// Fail if this lane's buffers are not host-accessible pointer-identity zero-copy tensors.
+    pub fn assert_zero_copy_plan(&self) -> Result<()> {
+        for (i, input) in self.inputs.iter().enumerate() {
+            assert_tensor_buffer_zero_copy("static I/O lane input", i, input)?;
+        }
+        for (i, output) in self.outputs.iter().enumerate() {
+            assert_tensor_buffer_zero_copy("static I/O lane output", i, output)?;
+        }
+        Ok(())
+    }
+
     /// Rebind inputs before every run.
     ///
     /// This is not the default because it adds per-run name marshaling and breaks the
@@ -531,6 +711,23 @@ impl Default for DynamicIoOptions {
             input_policy: LaneBufferPolicy::Auto,
             output_policy: LaneBufferPolicy::Auto,
             rebind_inputs_each_run: false,
+        }
+    }
+}
+
+/// Borrowed concrete input/output shapes for prebuilding or warming dynamic runtime buckets.
+#[derive(Debug, Clone, Copy)]
+pub struct ShapeSpec<'a, const INPUTS: usize, const OUTPUTS: usize> {
+    pub input_shapes: [&'a [i64]; INPUTS],
+    pub output_shapes: [&'a [i64]; OUTPUTS],
+}
+
+impl<'a, const INPUTS: usize, const OUTPUTS: usize> ShapeSpec<'a, INPUTS, OUTPUTS> {
+    #[inline]
+    pub fn new(input_shapes: [&'a [i64]; INPUTS], output_shapes: [&'a [i64]; OUTPUTS]) -> Self {
+        Self {
+            input_shapes,
+            output_shapes,
         }
     }
 }
@@ -651,6 +848,18 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
     /// Run every lane in this bucket `runs` times to prime ORT shape and memory caches.
     pub fn prime(&mut self, runs: usize) -> Result<()> {
         self.lanes.prime(runs)
+    }
+
+    /// Snapshot every lane's hot-path pointer and placement plan for this cached shape.
+    ///
+    /// Diagnostic/setup API; may allocate.
+    pub fn audit_hot_path(&self) -> Result<Vec<LaneHotPathAudit>> {
+        self.lanes.audit_hot_path()
+    }
+
+    /// Fail if any lane in this cached shape is not pointer-identity zero-copy.
+    pub fn assert_zero_copy_plan(&self) -> Result<()> {
+        self.lanes.assert_zero_copy_plan()
     }
 }
 
@@ -931,6 +1140,21 @@ impl<T: TensorElement> Runtime<T> {
         Ok(())
     }
 
+    /// Snapshot every lane's hot-path pointer and placement plan.
+    ///
+    /// Diagnostic/setup API; may allocate.
+    pub fn audit_hot_path(&self) -> Result<Vec<LaneHotPathAudit>> {
+        self.lanes.iter().map(Lane::audit_hot_path).collect()
+    }
+
+    /// Fail if any lane is not pointer-identity zero-copy over host-accessible buffers.
+    pub fn assert_zero_copy_plan(&self) -> Result<()> {
+        for lane in &self.lanes {
+            lane.assert_zero_copy_plan()?;
+        }
+        Ok(())
+    }
+
     /// Consume this value. Kept as a no-op migration helper from the previous checkout runtime.
     #[inline]
     pub fn into_lane_set(self) -> Self {
@@ -1202,6 +1426,24 @@ impl<I: TensorElement, O: TensorElement, const INPUTS: usize, const OUTPUTS: usi
         for lane in &mut self.lanes {
             lane.set_rebind_inputs_each_run(enabled);
         }
+    }
+
+    /// Snapshot every lane's hot-path pointer and placement plan.
+    ///
+    /// Diagnostic/setup API; may allocate.
+    pub fn audit_hot_path(&self) -> Result<Vec<LaneHotPathAudit>> {
+        self.lanes
+            .iter()
+            .map(StaticIoLane::audit_hot_path)
+            .collect()
+    }
+
+    /// Fail if any lane is not pointer-identity zero-copy over host-accessible buffers.
+    pub fn assert_zero_copy_plan(&self) -> Result<()> {
+        for lane in &self.lanes {
+            lane.assert_zero_copy_plan()?;
+        }
+        Ok(())
     }
 }
 
@@ -1517,12 +1759,53 @@ where
         true
     }
 
+    /// Create or find a set of concrete shape buckets.
+    ///
+    /// Returns the number of specs processed. If more unique shapes are passed than
+    /// [`Self::max_buckets`], the runtime's normal bounded-cache eviction policy applies.
+    pub fn prebuild_buckets<'a>(
+        &mut self, specs: impl IntoIterator<Item = ShapeSpec<'a, INPUTS, OUTPUTS>>,
+    ) -> Result<usize> {
+        let mut count = 0usize;
+        for spec in specs {
+            self.get_or_create_bucket(spec.input_shapes, spec.output_shapes)?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
     /// Create or find a bucket and run every lane `runs` times.
     pub fn prime_bucket(
         &mut self, input_shapes: [&[i64]; INPUTS], output_shapes: [&[i64]; OUTPUTS], runs: usize,
     ) -> Result<()> {
         self.get_or_create_bucket(input_shapes, output_shapes)?
             .prime(runs)
+    }
+
+    /// Run every currently cached bucket's every lane `runs` times.
+    ///
+    /// This does not create new buckets. Pair it with [`Self::prebuild_buckets`] to warm a fixed
+    /// shape plan before serving.
+    pub fn prime_cached_buckets(&mut self, runs: usize) -> Result<()> {
+        for bucket in &mut self.buckets {
+            bucket.prime(runs)?;
+        }
+        Ok(())
+    }
+
+    /// Create/find each bucket in `specs`, then warm every lane in that bucket.
+    ///
+    /// Returns the number of specs processed.
+    pub fn warm_buckets<'a>(
+        &mut self, specs: impl IntoIterator<Item = ShapeSpec<'a, INPUTS, OUTPUTS>>, runs: usize,
+    ) -> Result<usize> {
+        let mut count = 0usize;
+        for spec in specs {
+            self.get_or_create_bucket(spec.input_shapes, spec.output_shapes)?
+                .prime(runs)?;
+            count += 1;
+        }
+        Ok(count)
     }
 
     /// Run a closure against one lane in the matching shape bucket, creating the bucket on first
@@ -1534,5 +1817,24 @@ where
     ) -> Result<R> {
         self.get_or_create_bucket(input_shapes, output_shapes)?
             .run_on(lane, f)
+    }
+
+    /// Snapshot every cached bucket's hot-path pointer and placement plan.
+    ///
+    /// This only audits buckets that already exist. It does not create new buckets.
+    /// Diagnostic/setup API; may allocate.
+    pub fn audit_cached_hot_paths(&self) -> Result<Vec<Vec<LaneHotPathAudit>>> {
+        self.buckets
+            .iter()
+            .map(ShapeBucket::audit_hot_path)
+            .collect()
+    }
+
+    /// Fail if any cached bucket is not pointer-identity zero-copy.
+    pub fn assert_cached_zero_copy_plan(&self) -> Result<()> {
+        for bucket in &self.buckets {
+            bucket.assert_zero_copy_plan()?;
+        }
+        Ok(())
     }
 }

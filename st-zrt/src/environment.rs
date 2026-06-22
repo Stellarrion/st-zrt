@@ -19,6 +19,13 @@ pub(crate) struct EnvInner {
     threading: Option<crate::threading::ThreadingOptions>,
 }
 
+impl EnvInner {
+    #[inline]
+    pub(crate) fn as_ptr(&self) -> *const sys::EnvHandle {
+        self.env as *const sys::EnvHandle
+    }
+}
+
 /// The ORT environment (logging + global state). Cheap to clone (one `Arc` refcount); the
 /// underlying `OrtEnv` is shared and freed only when the last clone AND every `Session`
 /// derived from it are dropped.

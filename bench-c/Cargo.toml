@@ -52,6 +52,10 @@ harness = false
 name = "runtime_shapes"
 harness = false
 
+[[bench]]
+name = "tail_latency"
+harness = false
+
 [profile.release]
 # Benchmark harnesses are intentionally tuned for stable local comparison numbers.
 debug = true

@@ -58,6 +58,23 @@ fn bench_static_io_direct(c: &mut Criterion) {
     });
 }
 
+fn bench_static_io_direct_unsynchronized(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let mut runtime =
+        StaticIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), &mem, [&INPUT], [&OUTPUT], 1)
+            .expect("static runtime");
+    runtime.prime(32).expect("prime");
+
+    c.bench_function("runtime/static_io_direct_unsynchronized", |b| {
+        b.iter(|| {
+            let lane = runtime.lane_mut(0).expect("lane");
+            lane.run_unsynchronized().expect("run");
+            black_box(lane.output_at::<0>().expect("output"));
+        });
+    });
+}
+
 fn bench_static_io_run_on(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
@@ -75,6 +92,73 @@ fn bench_static_io_run_on(c: &mut Criterion) {
                     Ok(())
                 })
                 .expect("run_on");
+        });
+    });
+}
+
+fn bench_static_io_run_on_unsynchronized(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let mut runtime =
+        StaticIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), &mem, [&INPUT], [&OUTPUT], 1)
+            .expect("static runtime");
+    runtime.prime(32).expect("prime");
+
+    c.bench_function("runtime/static_io_run_on_unsynchronized", |b| {
+        b.iter(|| {
+            runtime
+                .run_on(0, |lane| {
+                    lane.run_unsynchronized()?;
+                    black_box(lane.output_at::<0>()?);
+                    Ok(())
+                })
+                .expect("run_on");
+        });
+    });
+}
+
+fn bench_static_io_rebind_run(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        Arc::new(sess),
+        &mem,
+        [&INPUT],
+        [&OUTPUT],
+        1,
+    )
+    .expect("static runtime");
+    runtime.set_rebind_inputs_each_run(true);
+    runtime.prime(32).expect("prime");
+
+    c.bench_function("runtime/static_io_rebind_run", |b| {
+        b.iter(|| {
+            let lane = runtime.lane_mut(0).expect("lane");
+            lane.run().expect("run");
+            black_box(lane.output_at::<0>().expect("output"));
+        });
+    });
+}
+
+fn bench_static_io_rebind_run_unsynchronized(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        Arc::new(sess),
+        &mem,
+        [&INPUT],
+        [&OUTPUT],
+        1,
+    )
+    .expect("static runtime");
+    runtime.set_rebind_inputs_each_run(true);
+    runtime.prime(32).expect("prime");
+
+    c.bench_function("runtime/static_io_rebind_run_unsynchronized", |b| {
+        b.iter(|| {
+            let lane = runtime.lane_mut(0).expect("lane");
+            lane.run_unsynchronized().expect("run");
+            black_box(lane.output_at::<0>().expect("output"));
         });
     });
 }
@@ -118,6 +202,87 @@ fn bench_dynamic_cached_run_on(c: &mut Criterion) {
             runtime
                 .run_on([&INPUT], [&OUTPUT], 0, |lane| {
                     lane.run()?;
+                    black_box(lane.output_at::<0>()?);
+                    Ok(())
+                })
+                .expect("dynamic run_on");
+        });
+    });
+}
+
+fn bench_dynamic_cached_run_on_unsynchronized(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let mut runtime =
+        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 1)
+            .expect("dynamic runtime");
+    runtime
+        .prime_bucket([&INPUT], [&OUTPUT], 32)
+        .expect("prime bucket");
+
+    c.bench_function("runtime/dynamic_cached_run_on_unsynchronized", |b| {
+        b.iter(|| {
+            runtime
+                .run_on([&INPUT], [&OUTPUT], 0, |lane| {
+                    lane.run_unsynchronized()?;
+                    black_box(lane.output_at::<0>()?);
+                    Ok(())
+                })
+                .expect("dynamic run_on");
+        });
+    });
+}
+
+fn bench_dynamic_cached_rebind_run_on(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let output_mem = mem.try_clone_descriptor().expect("output memory");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        Arc::new(sess),
+        mem,
+        output_mem,
+        1,
+        DynamicIoOptions::new(1).with_rebind_inputs_each_run(true),
+    )
+    .expect("dynamic runtime");
+    runtime
+        .prime_bucket([&INPUT], [&OUTPUT], 32)
+        .expect("prime bucket");
+
+    c.bench_function("runtime/dynamic_cached_rebind_run_on", |b| {
+        b.iter(|| {
+            runtime
+                .run_on([&INPUT], [&OUTPUT], 0, |lane| {
+                    lane.run()?;
+                    black_box(lane.output_at::<0>()?);
+                    Ok(())
+                })
+                .expect("dynamic run_on");
+        });
+    });
+}
+
+fn bench_dynamic_cached_rebind_run_on_unsynchronized(c: &mut Criterion) {
+    let env = Environment::new().expect("env");
+    let (sess, mem) = session(&env);
+    let output_mem = mem.try_clone_descriptor().expect("output memory");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        Arc::new(sess),
+        mem,
+        output_mem,
+        1,
+        DynamicIoOptions::new(1).with_rebind_inputs_each_run(true),
+    )
+    .expect("dynamic runtime");
+    runtime
+        .prime_bucket([&INPUT], [&OUTPUT], 32)
+        .expect("prime bucket");
+
+    c.bench_function("runtime/dynamic_cached_rebind_run_on_unsynchronized", |b| {
+        b.iter(|| {
+            runtime
+                .run_on([&INPUT], [&OUTPUT], 0, |lane| {
+                    lane.run_unsynchronized()?;
                     black_box(lane.output_at::<0>()?);
                     Ok(())
                 })
@@ -272,9 +437,16 @@ criterion_group!(
     benches,
     bench_homogeneous_runtime_direct,
     bench_static_io_direct,
+    bench_static_io_direct_unsynchronized,
     bench_static_io_run_on,
+    bench_static_io_run_on_unsynchronized,
+    bench_static_io_rebind_run,
+    bench_static_io_rebind_run_unsynchronized,
     bench_static_io_dispatch_only,
     bench_dynamic_cached_run_on,
+    bench_dynamic_cached_run_on_unsynchronized,
+    bench_dynamic_cached_rebind_run_on,
+    bench_dynamic_cached_rebind_run_on_unsynchronized,
     bench_dynamic_cached_dispatch_only,
     bench_dynamic_cached_bucket_direct,
     bench_dynamic_cached_bucket_dispatch_only,

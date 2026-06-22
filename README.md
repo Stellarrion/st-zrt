@@ -31,6 +31,9 @@ primitives to wire inference without wrapper overhead.
   interop wrappers.
 - **Provider-aware serving controls**: IoBinding synchronization and opt-in per-run input rebinding
   for reusable CUDA/TensorRT lanes that need stricter input freshness.
+- **Placement diagnostics and explicit copies**: inspect session input/output memory plans,
+  EP-device assignment, tensor memory devices, and copy values into reusable buffers via ORT
+  `CopyTensors` with a host-accessible fallback.
 - **Generated FFI**: `st-zrt-sys` mirrors ONNX Runtime 1.27.0 with a zrt-namespaced raw table and no
   `bindgen`.
 
@@ -50,27 +53,57 @@ That run was **29.8% faster on the mean** and had a much tighter latency spread.
 Rust wrapper layer and session/input/output path around ONNX Runtime; ONNX Runtime itself still
 provides the kernels and graph execution.
 
+## Local Hot-Path Benchmarks
+
+Latest local quick run, June 22, 2026, against the repository MNIST/relay benchmark models:
+
+```bash
+ST_ZRT_TAIL_ITERS=10000 cargo bench --manifest-path bench-c/Cargo.toml --bench tail_latency
+cargo bench --manifest-path bench-c/Cargo.toml --bench runtime_shapes -- --quick
+cargo bench --manifest-path bench-c/Cargo.toml --bench inference -- --quick
+cargo bench --manifest-path bench-c/Cargo.toml --bench large -- --quick
+```
+
+Representative serving-path results:
+
+| Path | Result |
+| --- | ---: |
+| static IoBinding lane, bind once | p50 18.581 us, p99 22.671 us |
+| static IoBinding lane, rebind each run | p50 18.840 us, p99 23.000 us |
+| static IoBinding lane, rebind + unsynchronized | p50 18.831 us, p99 22.460 us |
+| `runtime/static_io_direct` | 18.953 us |
+| `runtime/dynamic_cached_run_on` | 19.368 us |
+| `runtime/dynamic_cached_rebind_run_on` | 19.552 us |
+| `C_lane` MNIST inference | 19.107 us |
+| 4 MiB relay lane | 102.33 us |
+| 16 MiB relay lane | 706.89 us |
+
+The unsynchronized run APIs are intentionally opt-in: in these local runs they improve some tail
+samples, especially rebind p999, but do not beat synchronized bind-once median latency. Criterion
+reported no serving-path regressions after the 0.2.1 caller-owned output, device-output, bucket
+prebuild, and warmup API additions.
+
 ## Install
 
 ```toml
 [dependencies]
-st-zrt = "0.2.0"
+st-zrt = "0.2.1"
 ```
 
 The default feature set covers CPU inference. Optional surfaces are explicit:
 
 ```toml
 # Execution-provider option builders and EP device discovery.
-st-zrt = { version = "0.2.0", features = ["ep"] }
+st-zrt = { version = "0.2.1", features = ["ep"] }
 
 # CUDA ONNX Runtime build and strict CUDA inference tests. Implies `ep`.
-st-zrt = { version = "0.2.0", features = ["cuda"] }
+st-zrt = { version = "0.2.1", features = ["cuda"] }
 
 # Safe Rust custom operator authoring.
-st-zrt = { version = "0.2.0", features = ["custom-ops"] }
+st-zrt = { version = "0.2.1", features = ["custom-ops"] }
 
 # Graph/model editing and AOT compile wrappers.
-st-zrt = { version = "0.2.0", features = ["model-editor"] }
+st-zrt = { version = "0.2.1", features = ["model-editor"] }
 ```
 
 On first build, `st-zrt-sys` downloads and SHA-256 verifies the matching ONNX Runtime archive. To
@@ -150,7 +183,9 @@ This is the API shape `st-zrt` is built around:
 
 `LaneBufferPolicy::Auto` keeps small tensors on plain `Vec` storage and uses aligned, prefaulted
 storage for large static tensors. Very large buffers receive a best-effort Linux hugepage hint.
-Explicit policies are available when you need predictable memory behavior.
+Explicit policies are available when you need predictable memory behavior. Named presets
+(`balanced`, `latency`, `throughput_large`, `pinned_host_candidate`) keep the common choices
+readable without changing the underlying enum.
 
 CUDA and TensorRT callers that mutate reusable CPU input buffers can opt into stricter binding
 freshness:
@@ -162,6 +197,18 @@ lane.set_rebind_inputs_each_run(true);
 For dynamic shape-bucketed runtimes, use
 `DynamicIoOptions::new(max_buckets).with_rebind_inputs_each_run(true)`. The default remains
 bind-once because it preserves the zero-allocation CPU serving contract.
+
+Fixed shape plans should be admitted before traffic and warmed once:
+
+```rust
+let spec = ShapeSpec::new([&[1, 1, 28, 28]], [&[1, 10]]);
+dynamic.prebuild_buckets([spec])?;
+dynamic.prime_cached_buckets(8)?;
+```
+
+This keeps bucket allocation, IoBinding setup, and first-run ORT cache work out of the request
+path. `warm_buckets([spec], runs)` combines prebuild and warmup when startup code already has the
+full shape plan.
 
 ## Diagnostics
 
@@ -177,6 +224,31 @@ let opts = SessionOptions::new()
 This is useful for execution-provider placement, graph optimization, and CUDA Memcpy diagnostics.
 The `bert_cuda_probe` example is intentionally diagnostic: it compares normal `Session::run` with
 reusable static I/O on BERT-style text encoder ONNX graphs.
+
+For programmatic placement checks, use `Session::io_placement()` or the focused
+`input_memory_info` / `output_memory_info` / `input_ep_device` / `output_ep_device` accessors.
+Run outputs expose `OwnedValue::memory_info()` and, with `model-editor`, `memory_device()`.
+Wrap a tensor output in `DeviceValue` when the caller should make an explicit copy decision:
+
+```rust
+let value = DeviceValue::from_owned(outputs[0].take().expect("output"))?;
+let mut host = TensorBuffer::<f32>::zeros(&[1, 10], &MemoryInfo::cpu()?)?;
+value.copy_to_tensor_buffer(&session, &mut host)?;
+```
+
+For CUDA hot paths that must keep outputs device-resident, prefer preallocated outputs:
+`prepare_allocated_output_tensor_io_lane(..., &MemoryInfo::cuda(0)?, output_shapes)` binds stable
+`AllocatedTensor`s once and avoids `GetBoundOutputValues` in the serving loop. Device-output
+bindings that call `output_values()` are useful for inspection and flexible routing, but they are
+not the hard zero-allocation output path.
+
+These placement and audit APIs are setup/preflight tools and may allocate. Keep them outside the
+measured serving loop. The hot path is: build sessions, construct and audit lanes, prime them,
+then repeatedly mutate existing input buffers and call `run`.
+
+For fixed-arity regular runs that still need ORT-owned outputs, `Session::run_array` uses
+compile-time input/output counts and stack-backed handle arrays. For hard zero-copy output, prefer
+prepared IoBinding or lane APIs with caller-owned `TensorBuffer`s.
 
 ## Packed Sub-Byte Tensors
 
@@ -240,7 +312,7 @@ cargo check -p st-zrt --all-features
 Release checks are tag-bound:
 
 ```bash
-git tag -a st-zrt-v0.2.0 -m "st-zrt v0.2.0"
+git tag -a st-zrt-v0.2.1 -m "st-zrt v0.2.1"
 scripts/release-check.sh pre-sys-publish
 ```
 

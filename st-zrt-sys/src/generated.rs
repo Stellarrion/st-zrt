@@ -4903,14 +4903,10 @@ impl Api {
 }
 
 // void( * ReleaseOpAttr)( OrtOpAttr * input)
-#[cfg(feature = "custom-ops")]
 pub const IDX_RELEASE_OP_ATTR: usize = 212;
-#[cfg(feature = "custom-ops")]
 pub type ReleaseOpAttrFn = unsafe extern "C" fn(input: *mut OpAttrHandle) -> ();
-#[cfg(feature = "custom-ops")]
 impl Api {
     #[inline]
-    #[cfg(feature = "custom-ops")]
     pub unsafe fn release_op_attr(&self) -> ReleaseOpAttrFn {
         unsafe { self.f(IDX_RELEASE_OP_ATTR) }
     }

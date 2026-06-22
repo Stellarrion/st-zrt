@@ -90,7 +90,6 @@ fn cuda_ep_regular_run_matches_cpu() {
     let mem = MemoryInfo::cpu().expect("cpu mem");
     let buf: Vec<f32> = vec![0.0; 28 * 28];
     let input = zero_input(&mem, &buf);
-
     let cpu = cpu_session(&env, &path);
     let cpu_logits = run_cpu_reference(&cpu, &input);
 
@@ -191,6 +190,12 @@ fn cuda_iobinding_device_output_reports_cuda_memory() {
         vals[0].as_slice::<f32>().is_err(),
         "device-resident output must not expose a Rust slice"
     );
+    let mut host = st_zrt::TensorBuffer::<f32>::zeros(&[1, 10], &cpu_mem).expect("host output");
+    let copy = vals[0].copy_to_tensor_buffer(&cuda, &mut host);
+    assert!(
+        copy.is_err(),
+        "CUDA-to-host copy must be explicit and must not be silently emulated"
+    );
 }
 
 #[test]
@@ -220,6 +225,26 @@ fn cuda_allocated_output_tensor_binds_and_reports_cuda_memory() {
         .expect("sync allocated output");
     assert!(!out.raw_typed_ptr().expect("device pointer").is_null());
     assert!(out.as_slice().is_err());
+
+    let cuda_mem = MemoryInfo::cuda(0).expect("cuda memory info");
+    let mut lane = cuda
+        .prepare_allocated_output_tensor_io_lane::<f32>(
+            &cpu_mem,
+            &cuda_mem,
+            &[&[1, 1, 28, 28]],
+            &[&[1, 10]],
+        )
+        .expect("allocated-output lane");
+    lane.input_mut(0).expect("lane input").fill(0.0);
+    lane.run().expect("allocated-output lane run");
+    let lane_out_info = lane
+        .output_tensor(0)
+        .expect("lane output")
+        .memory_info()
+        .expect("lane output memory");
+    assert_eq!(lane_out_info.name, "Cuda");
+    assert_eq!(lane_out_info.device_id, 0);
+    assert!(lane.output(0).is_err());
 }
 
 #[test]
