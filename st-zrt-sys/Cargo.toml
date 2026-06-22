@@ -37,7 +37,7 @@ cuda = []
 # Pure-Rust download / verify / extract - no system curl, tar, or sha256sum. This is
 # what makes the build reproducible across Linux/macOS/Windows runners.
 ureq = "2.12"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 flate2 = "1"
 tar = "0.4"
