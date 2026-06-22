@@ -7,10 +7,10 @@
 
 use st_zrt::{
     Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, DynamicIoOptions, DynamicIoRuntime,
-    Environment, GraphOptimizationLevel, IoBinding, LaneBufferPolicy, LoggingLevel, MemType,
-    MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
+    Environment, GraphOptimizationLevel, IoBinding, IoDirection, LaneBufferPolicy, LoggingLevel,
+    MemType, MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
     PrepackedWeightsContainer, RunOptions, Runtime, RuntimeMode, Session, SessionOptions,
-    StaticIoLane, StaticIoRuntime, Tensor, TensorBuffer, sys,
+    ShapeSpec, StaticIoLane, StaticIoRuntime, Tensor, TensorBuffer, sys,
 };
 use std::sync::Arc;
 
@@ -286,6 +286,28 @@ fn prepared_iobinding_zero_copy_output() {
     let logits = out_val.as_slice::<f32>().expect("zero-copy output read");
     assert_eq!(logits.len(), 10);
     eprintln!("PreparedIoBinding wrote 10 logits into caller output");
+}
+
+#[test]
+fn prepared_iobinding_buffer_array_writes_caller_output() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let in_buf = vec![0.0_f32; 784];
+    let input = Tensor::from_buffer(&in_buf, &[1, 1, 28, 28], &mem).expect("input");
+    let out = TensorBuffer::<f32>::zeros(&[1, 10], &mem).expect("output buffer");
+    let mut prepared = sess
+        .prepare_io_binding_buffer_array::<f32, 1, 1>([&input], [&out])
+        .expect("prepare fixed binding");
+
+    prepared.run().expect("prepared iobinding run");
+    assert_eq!(out.as_slice().len(), 10);
 }
 
 #[test]
@@ -838,6 +860,59 @@ fn static_io_lane_runs_static_typed_io() {
 }
 
 #[test]
+fn static_io_lane_runs_unsynchronized_host_binding() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = Arc::new(sess);
+    let mut lane =
+        StaticIoLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+            .expect("static I/O lane");
+    lane.input_mut_at::<0>().expect("input").fill(0.0);
+    lane.run_unsynchronized().expect("run");
+    assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+}
+
+#[test]
+fn static_io_lane_hot_path_audit_reports_zero_copy_plan() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = Arc::new(sess);
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        session,
+        &mem,
+        [&[1, 1, 28, 28]],
+        [&[1, 10]],
+        1,
+    )
+    .expect("static I/O runtime");
+    runtime.set_rebind_inputs_each_run(true);
+    runtime.assert_zero_copy_plan().expect("zero-copy plan");
+    let audits = runtime.audit_hot_path().expect("audit");
+    assert_eq!(audits.len(), 1);
+    assert!(audits[0].rebind_inputs_each_run);
+    assert!(audits[0].input_names_cached);
+    assert_eq!(audits[0].inputs.len(), 1);
+    assert_eq!(audits[0].outputs.len(), 1);
+    assert!(audits[0].inputs[0].pointer_identity);
+    assert!(audits[0].outputs[0].pointer_identity);
+    assert_eq!(audits[0].inputs[0].memory_info.name, "Cpu");
+}
+
+#[test]
 fn static_io_runtime_runs_shared_typed_lanes() {
     let env = Environment::new().expect("env");
     let (mem, sess) = match mnist_session(&env) {
@@ -922,6 +997,34 @@ fn dynamic_io_runtime_caches_and_runs_shape_bucket() {
     assert_eq!(runtime.bucket_count(), 1);
     runtime.clear_buckets();
     assert_eq!(runtime.bucket_count(), 0);
+}
+
+#[test]
+fn dynamic_io_runtime_prebuilds_and_warms_shape_plan() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = Arc::new(sess);
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(session, mem, 2)
+        .expect("dynamic I/O runtime");
+    let spec = ShapeSpec::new([&[1, 1, 28, 28][..]], [&[1, 10][..]]);
+
+    assert_eq!(runtime.prebuild_buckets([spec]).expect("prebuild"), 1);
+    assert_eq!(runtime.bucket_count(), 1);
+    runtime
+        .prime_cached_buckets(1)
+        .expect("warm cached buckets");
+
+    runtime.clear_buckets();
+    assert_eq!(runtime.warm_buckets([spec], 1).expect("warm plan"), 1);
+    assert_eq!(runtime.bucket_count(), 1);
+    assert!(runtime.bucket([&[1, 1, 28, 28]], [&[1, 10]]).is_some());
 }
 
 #[test]
@@ -1065,6 +1168,111 @@ fn memory_info_named() {
         "MemoryInfo::new_named round-trips (name={:?})",
         mem.name().unwrap()
     );
+}
+
+#[test]
+fn session_io_placement_reports_memory_and_ep_assignment() {
+    let env = Environment::new().expect("env");
+    let Some((_mem, sess)) = mnist_session(&env) else {
+        eprintln!("skipping session_io_placement_reports_memory_and_ep_assignment — mnist absent");
+        return;
+    };
+
+    let placement = sess.io_placement().expect("io placement");
+    assert_eq!(placement.len(), sess.input_count() + sess.output_count());
+    assert_eq!(placement[0].direction, IoDirection::Input);
+    assert_eq!(placement[0].index, 0);
+    assert_eq!(placement[0].element_type, st_zrt::ElementType::Float);
+    assert_eq!(placement[0].memory_info.name, "Cpu");
+    assert_eq!(placement[0].memory_info.device_id, 0);
+    assert_eq!(placement[1].direction, IoDirection::Output);
+    assert_eq!(placement[1].memory_info.name, "Cpu");
+
+    let input_mem = sess.input_memory_info(0).expect("input memory info");
+    let output_mem = sess.output_memory_info(0).expect("output memory info");
+    assert_eq!(input_mem.name, "Cpu");
+    assert_eq!(output_mem.name, "Cpu");
+    let _ = sess.input_ep_device(0).expect("input ep device query");
+    let _ = sess.output_ep_device(0).expect("output ep device query");
+}
+
+#[test]
+fn copy_tensors_copies_owned_value_to_tensor_buffer() {
+    let env = Environment::new().expect("env");
+    let Some((mem, sess)) = mnist_session(&env) else {
+        eprintln!("skipping copy_tensors_copies_owned_value_to_tensor_buffer — mnist absent");
+        return;
+    };
+
+    let input_data = vec![0.0_f32; 28 * 28];
+    let input = Tensor::from_buffer(&input_data, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut outputs).expect("run");
+
+    let output = outputs[0].take().expect("output");
+    let expected = output.as_slice::<f32>().expect("host output").to_vec();
+    let device_value = output.into_device_value().expect("device value");
+    let mut dst = TensorBuffer::<f32>::zeros(&[1, 10], &mem).expect("dst");
+    device_value
+        .copy_to_tensor_buffer(&sess, &mut dst)
+        .expect("copy tensors");
+    assert_eq!(dst.as_slice(), &expected[..]);
+}
+
+#[test]
+fn owned_value_copy_convenience_copies_to_tensor_buffer() {
+    let env = Environment::new().expect("env");
+    let Some((mem, sess)) = mnist_session(&env) else {
+        eprintln!("skipping owned_value_copy_convenience_copies_to_tensor_buffer — mnist absent");
+        return;
+    };
+
+    let input_data = vec![0.0_f32; 28 * 28];
+    let input = Tensor::from_buffer(&input_data, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut outputs).expect("run");
+    let output = outputs[0].as_ref().expect("output");
+    let expected = output.as_slice::<f32>().expect("host output").to_vec();
+    let mut dst = TensorBuffer::<f32>::zeros(&[1, 10], &mem).expect("dst");
+    output
+        .copy_to_tensor_buffer(&sess, &mut dst)
+        .expect("copy tensors");
+    assert_eq!(dst.as_slice(), &expected[..]);
+}
+
+#[test]
+fn lane_buffer_policy_presets_are_stable() {
+    assert_eq!(LaneBufferPolicy::balanced(), LaneBufferPolicy::Auto);
+    assert_eq!(LaneBufferPolicy::latency(), LaneBufferPolicy::Prefaulted);
+    assert_eq!(
+        LaneBufferPolicy::throughput_large(),
+        LaneBufferPolicy::HugePagePrefaulted
+    );
+    assert_eq!(
+        LaneBufferPolicy::pinned_host_candidate(),
+        LaneBufferPolicy::HugePageMlockedPrefaulted
+    );
+}
+
+#[cfg(feature = "model-editor")]
+#[test]
+fn memory_device_snapshots_are_available_with_ep_sub_api() {
+    let mem = MemoryInfo::cpu().expect("cpu mem");
+    let device = mem.memory_device().expect("memory device");
+    assert_eq!(device.device_id, 0);
+
+    let env = Environment::new().expect("env");
+    let Some((mem, sess)) = mnist_session(&env) else {
+        eprintln!("skipping memory_device_snapshots_are_available_with_ep_sub_api — mnist absent");
+        return;
+    };
+    let input_data = vec![0.0_f32; 28 * 28];
+    let input = Tensor::from_buffer(&input_data, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut outputs).expect("run");
+    let output = outputs[0].as_ref().expect("output");
+    let value_device = output.memory_device().expect("value memory device");
+    assert_eq!(value_device.device_id, 0);
 }
 
 #[test]

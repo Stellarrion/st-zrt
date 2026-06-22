@@ -1,6 +1,6 @@
 use st_zrt::{
-    DynamicIoRuntime, Environment, GraphOptimizationLevel, MemoryInfo, OutputValue, Runtime,
-    Session, SessionOptions, StaticIoRuntime, Tensor, TensorBuffer,
+    DynamicIoOptions, DynamicIoRuntime, Environment, GraphOptimizationLevel, MemoryInfo,
+    OutputValue, Runtime, Session, SessionOptions, StaticIoRuntime, Tensor, TensorBuffer,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::Arc;
@@ -143,6 +143,28 @@ fn prepared_iobinding_run_is_rust_zero_alloc() {
         assert_eq!(output.as_slice().len(), 10);
     });
     assert_eq!(allocs, 0, "PreparedIoBinding::run allocated {allocs} times");
+}
+
+#[test]
+fn session_run_array_is_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+
+    let input_buf = vec![0.0_f32; 784];
+    let input = Tensor::from_buffer(&input_buf, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs: [Option<st_zrt::OwnedValue>; 1] = std::array::from_fn(|_| None);
+    for _ in 0..8 {
+        sess.run_array([&input], &mut outputs).expect("warmup");
+    }
+
+    let allocs = measured_allocs(|| {
+        sess.run_array([&input], &mut outputs).expect("run_array");
+        assert_eq!(outputs[0].as_ref().unwrap().element_count(), 10);
+    });
+    assert_eq!(allocs, 0, "Session::run_array allocated {allocs} times");
 }
 
 #[test]
@@ -348,6 +370,44 @@ fn static_io_runtime_runs_are_rust_zero_alloc() {
 }
 
 #[test]
+fn static_io_runtime_rebind_runs_are_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+
+    let mut lanes = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        Arc::new(sess),
+        &mem,
+        [&[1, 1, 28, 28]],
+        [&[1, 10]],
+        1,
+    )
+    .expect("static I/O lane set");
+    lanes.set_rebind_inputs_each_run(true);
+    for lane in lanes.lanes_mut() {
+        lane.input_mut_at::<0>().expect("input").fill(0.0);
+        lane.run().expect("warmup");
+    }
+
+    let allocs = measured_allocs(|| {
+        lanes
+            .run_on(0, |lane| {
+                lane.input_mut_at::<0>()?.fill(0.0);
+                lane.run()?;
+                assert_eq!(lane.output_at::<0>()?.len(), 10);
+                Ok(())
+            })
+            .expect("rebind run");
+    });
+    assert_eq!(
+        allocs, 0,
+        "StaticIoRuntime rebind run allocated {allocs} times"
+    );
+}
+
+#[test]
 fn dynamic_io_runtime_cached_runs_are_rust_zero_alloc() {
     let _guard = test_guard();
     let Some((_env, mem, sess)) = mnist_session() else {
@@ -383,6 +443,44 @@ fn dynamic_io_runtime_cached_runs_are_rust_zero_alloc() {
     assert_eq!(
         allocs, 0,
         "DynamicIoRuntime cached run allocated {allocs} times"
+    );
+}
+
+#[test]
+fn dynamic_io_runtime_cached_rebind_runs_are_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+
+    let output_mem = mem.try_clone_descriptor().expect("output memory");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        Arc::new(sess),
+        mem,
+        output_mem,
+        1,
+        DynamicIoOptions::new(1).with_rebind_inputs_each_run(true),
+    )
+    .expect("dynamic I/O runtime");
+    runtime
+        .prime_bucket([&[1, 1, 28, 28]], [&[1, 10]], 8)
+        .expect("prime bucket");
+    assert_eq!(runtime.bucket_count(), 1);
+
+    let allocs = measured_allocs(|| {
+        runtime
+            .run_on([&[1, 1, 28, 28]], [&[1, 10]], 0, |lane| {
+                lane.input_mut_at::<0>()?.fill(0.0);
+                lane.run()?;
+                assert_eq!(lane.output_at::<0>()?.len(), 10);
+                Ok(())
+            })
+            .expect("cached rebind run");
+    });
+    assert_eq!(
+        allocs, 0,
+        "DynamicIoRuntime cached rebind run allocated {allocs} times"
     );
 }
 

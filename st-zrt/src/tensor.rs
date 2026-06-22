@@ -868,6 +868,14 @@ impl<T: TensorElement> TensorBuffer<T> {
     }
 
     #[inline]
+    pub fn byte_len(&self) -> Result<usize> {
+        self.data
+            .len()
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| Error::new(-1, "tensor buffer byte length overflows usize"))
+    }
+
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -884,6 +892,11 @@ impl<T: TensorElement> TensorBuffer<T> {
         check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
         let data = crate::slice_data_ptr(data as *mut T, self.len(), "tensor buffer data")?;
         Ok(data as *const T)
+    }
+
+    /// Memory descriptor for this wrapped tensor buffer.
+    pub fn memory_info(&self) -> Result<crate::memory::MemoryInfoSnapshot> {
+        tensor_memory_info(self.value as *const sys::ValueHandle)
     }
 
     #[inline]
@@ -1818,6 +1831,40 @@ impl OwnedValue {
         tensor_memory_info(self.value as *const sys::ValueHandle)
     }
 
+    /// Wrap this tensor output as a placement-aware value, forcing the caller to make explicit
+    /// host/device copy decisions.
+    pub fn into_device_value(self) -> Result<DeviceValue> {
+        DeviceValue::from_owned(self)
+    }
+
+    /// Copy this value into an existing reusable tensor buffer via ORT `CopyTensors`.
+    pub fn copy_to_tensor_buffer<T: TensorElement>(
+        &self, session: &crate::Session, dst: &mut TensorBuffer<T>,
+    ) -> Result<()> {
+        session.copy_value_to_tensor_buffer(self, dst)
+    }
+
+    /// Copy this value into an existing ORT-allocated tensor via ORT `CopyTensors`.
+    pub fn copy_to_allocated_tensor<T: TensorElement>(
+        &self, session: &crate::Session, dst: &mut AllocatedTensor<T>,
+    ) -> Result<()> {
+        session.copy_value_to_allocated_tensor(self, dst)
+    }
+
+    /// ORT 1.27 memory-device descriptor for this tensor's backing allocation.
+    #[cfg(feature = "model-editor")]
+    pub fn memory_device(&self) -> Result<crate::memory::MemoryDeviceSnapshot> {
+        let ep = crate::model_editor::ep_api()
+            .ok_or_else(|| crate::Error::new(-1, "EpApi unavailable"))?;
+        let device = unsafe {
+            ep.Value_GetMemoryDevice
+                .ok_or_else(|| crate::Error::new(-1, "Value_GetMemoryDevice unavailable"))?(
+                self.value as *const sys::ValueHandle,
+            )
+        };
+        crate::memory::memory_device_snapshot_from_ptr(device)
+    }
+
     /// Zero-copy read of the engine-owned backing buffer as a typed slice
     /// (`GetTensorMutableData`). One FFI call, no allocation, no introspection.
     pub fn as_slice<T: TensorElement>(&self) -> Result<&[T]> {
@@ -1920,6 +1967,82 @@ pub(crate) fn read_string_tensor(
 
 unsafe impl Send for OwnedValue {}
 unsafe impl Sync for OwnedValue {}
+
+/// An owned ORT value intended for explicit device/placement-aware handling.
+///
+/// This is a thin ergonomic wrapper around [`OwnedValue`]. It does not change ownership: the
+/// wrapped `OrtValue` is still released on drop. Use this when an output may live on CUDA or
+/// another EP device and callers should make an explicit copy decision instead of trying to read
+/// it as a host slice.
+pub struct DeviceValue {
+    value: OwnedValue,
+}
+
+impl DeviceValue {
+    /// Wrap an engine-owned tensor value for explicit placement-aware handling.
+    pub fn from_owned(value: OwnedValue) -> Result<Self> {
+        if value.onnx_type != sys::OnnxType::Tensor {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: DeviceValue requires a tensor, got {:?}",
+                    value.onnx_type
+                ),
+            ));
+        }
+        Ok(Self { value })
+    }
+
+    #[inline]
+    pub fn as_owned(&self) -> &OwnedValue {
+        &self.value
+    }
+
+    #[inline]
+    pub fn into_owned(self) -> OwnedValue {
+        self.value
+    }
+
+    #[inline]
+    pub fn element_type(&self) -> sys::ElementType {
+        self.value.element_type()
+    }
+
+    #[inline]
+    pub fn element_count(&self) -> usize {
+        self.value.element_count()
+    }
+
+    #[inline]
+    pub fn byte_len(&self) -> Result<usize> {
+        self.value.byte_len()
+    }
+
+    #[inline]
+    pub fn memory_info(&self) -> Result<crate::memory::MemoryInfoSnapshot> {
+        self.value.memory_info()
+    }
+
+    #[cfg(feature = "model-editor")]
+    #[inline]
+    pub fn memory_device(&self) -> Result<crate::memory::MemoryDeviceSnapshot> {
+        self.value.memory_device()
+    }
+
+    /// Copy this value into an existing reusable tensor buffer via ORT `CopyTensors`.
+    pub fn copy_to_tensor_buffer<T: TensorElement>(
+        &self, session: &crate::Session, dst: &mut TensorBuffer<T>,
+    ) -> Result<()> {
+        session.copy_value_to_tensor_buffer(&self.value, dst)
+    }
+
+    /// Copy this value into an existing ORT-allocated tensor via ORT `CopyTensors`.
+    pub fn copy_to_allocated_tensor<T: TensorElement>(
+        &self, session: &crate::Session, dst: &mut AllocatedTensor<T>,
+    ) -> Result<()> {
+        session.copy_value_to_allocated_tensor(&self.value, dst)
+    }
+}
 
 impl Drop for OwnedValue {
     fn drop(&mut self) {

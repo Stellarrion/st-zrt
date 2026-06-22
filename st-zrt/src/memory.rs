@@ -13,6 +13,17 @@ pub struct MemoryInfoSnapshot {
     pub device_id: i32,
     pub alloc_type: sys::AllocatorType,
     pub mem_type: sys::MemType,
+    pub device_type: i32,
+    pub device_mem_type: i32,
+    pub vendor_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryDeviceSnapshot {
+    pub device_type: i32,
+    pub memory_type: i32,
+    pub vendor_id: u32,
+    pub device_id: u32,
 }
 
 impl MemoryInfoSnapshot {
@@ -123,6 +134,15 @@ impl MemoryInfo {
         snapshot_from_ptr(self.info as *const sys::MemoryInfoHandle)
     }
 
+    /// ORT 1.27 memory-device descriptor for this memory info.
+    ///
+    /// This is exposed through ORT's EP sub-API, so it is available when the `model-editor`
+    /// feature is enabled in the current crate configuration.
+    #[cfg(feature = "model-editor")]
+    pub fn memory_device(&self) -> Result<MemoryDeviceSnapshot> {
+        memory_device_from_memory_info(self.info as *const sys::MemoryInfoHandle)
+    }
+
     /// Create a fresh ORT memory-info handle with the same descriptor fields.
     pub fn try_clone_descriptor(&self) -> Result<Self> {
         let snapshot = self.snapshot()?;
@@ -165,12 +185,80 @@ pub(crate) fn snapshot_from_ptr(info: *const sys::MemoryInfoHandle) -> Result<Me
     let mut alloc_type = sys::AllocatorType::Invalid;
     check(unsafe { api().memory_info_get_type()(info, &mut alloc_type) })?;
 
+    let mut device_type = 0i32;
+    unsafe { api().memory_info_get_device_type()(info, &mut device_type) };
+
+    let device_mem_type = unsafe { api().memory_info_get_device_mem_type()(info) };
+    let vendor_id = unsafe { api().memory_info_get_vendor_id()(info) };
+
     Ok(MemoryInfoSnapshot {
         name,
         device_id,
         alloc_type,
         mem_type,
+        device_type,
+        device_mem_type,
+        vendor_id,
     })
+}
+
+#[cfg(feature = "model-editor")]
+pub(crate) fn memory_device_snapshot_from_ptr(
+    device: *const sys::MemoryDeviceHandle,
+) -> Result<MemoryDeviceSnapshot> {
+    if device.is_null() {
+        return Err(crate::Error::new(-1, "memory device pointer is null"));
+    }
+    let ep =
+        crate::model_editor::ep_api().ok_or_else(|| crate::Error::new(-1, "EpApi unavailable"))?;
+    let device_type = unsafe {
+        ep.MemoryDevice_GetDeviceType
+            .ok_or_else(|| crate::Error::new(-1, "MemoryDevice_GetDeviceType unavailable"))?(
+            device
+        )
+    };
+    let memory_type = unsafe {
+        ep.MemoryDevice_GetMemoryType
+            .ok_or_else(|| crate::Error::new(-1, "MemoryDevice_GetMemoryType unavailable"))?(
+            device
+        )
+    };
+    let vendor_id = unsafe {
+        ep.MemoryDevice_GetVendorId
+            .ok_or_else(|| crate::Error::new(-1, "MemoryDevice_GetVendorId unavailable"))?(
+            device
+        )
+    };
+    let device_id = unsafe {
+        ep.MemoryDevice_GetDeviceId
+            .ok_or_else(|| crate::Error::new(-1, "MemoryDevice_GetDeviceId unavailable"))?(
+            device
+        )
+    };
+    Ok(MemoryDeviceSnapshot {
+        device_type,
+        memory_type,
+        vendor_id,
+        device_id,
+    })
+}
+
+#[cfg(feature = "model-editor")]
+pub(crate) fn memory_device_from_memory_info(
+    info: *const sys::MemoryInfoHandle,
+) -> Result<MemoryDeviceSnapshot> {
+    if info.is_null() {
+        return Err(crate::Error::new(-1, "memory info pointer is null"));
+    }
+    let ep =
+        crate::model_editor::ep_api().ok_or_else(|| crate::Error::new(-1, "EpApi unavailable"))?;
+    let device = unsafe {
+        ep.MemoryInfo_GetMemoryDevice
+            .ok_or_else(|| crate::Error::new(-1, "MemoryInfo_GetMemoryDevice unavailable"))?(
+            info
+        )
+    };
+    memory_device_snapshot_from_ptr(device)
 }
 
 impl Drop for MemoryInfo {

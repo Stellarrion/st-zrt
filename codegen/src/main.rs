@@ -531,7 +531,6 @@ fn classify(name: &str) -> Option<&'static str> {
         || n == "createop"
         || n == "addattribute"
         || n == "releaseop"
-        || n == "releaseopattr"
         || n == "createkernelinfo"
         || n == "releasekernelinfo"
         || n.starts_with("customopdomain")
