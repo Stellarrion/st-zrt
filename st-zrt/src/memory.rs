@@ -1,5 +1,5 @@
 //! `MemoryInfo` — describes where a tensor's backing memory lives.
-use crate::{api, check, sys, Result};
+use crate::{Result, api, check, sys};
 use std::ffi::c_char;
 use std::ptr;
 

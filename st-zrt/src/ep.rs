@@ -14,8 +14,8 @@
 //! over v1.)
 use crate::allocator::Allocator;
 use crate::session_options::SessionOptions;
-use crate::{api, check, sys, Result};
-use std::ffi::{c_char, c_void, CString};
+use crate::{Result, api, check, sys};
+use std::ffi::{CString, c_char, c_void};
 use std::ptr;
 
 /// A supported execution provider. The options-struct path (CUDA/TRT/ROCm/CANN/DNNL).
@@ -407,14 +407,16 @@ impl CudaOptions {
     ///
     /// `value` must point to an object valid for the lifetime ORT requires for `key`.
     pub unsafe fn update_with_value(&mut self, key: &str, value: *mut c_void) -> Result<&mut Self> {
-        let key = CString::new(key)
-            .map_err(|_| crate::Error::new(-1, "ep option key contains a NUL byte"))?;
-        check(api().update_cuda_provider_options_with_value()(
-            self.0,
-            key.as_ptr(),
-            value,
-        ))?;
-        Ok(self)
+        unsafe {
+            let key = CString::new(key)
+                .map_err(|_| crate::Error::new(-1, "ep option key contains a NUL byte"))?;
+            check(api().update_cuda_provider_options_with_value()(
+                self.0,
+                key.as_ptr(),
+                value,
+            ))?;
+            Ok(self)
+        }
     }
 }
 ep_options!(
@@ -958,10 +960,12 @@ mod tests {
         );
 
         let low_mem = CudaProviderOptions::from_preset(CudaPreset::low_memory(2, 1024));
-        assert!(low_mem
-            .entries()
-            .iter()
-            .any(|(k, v)| k == "arena_extend_strategy" && v == "kSameAsRequested"));
+        assert!(
+            low_mem
+                .entries()
+                .iter()
+                .any(|(k, v)| k == "arena_extend_strategy" && v == "kSameAsRequested")
+        );
     }
 
     /// OpenVINO V2 + VitisAI take key/value options directly at append time (no options
@@ -998,7 +1002,7 @@ mod tests {
     /// pointer, so this is sound.)
     #[test]
     fn migraphx_struct_layout() {
-        use core::ptr::{addr_of, NonNull};
+        use core::ptr::{NonNull, addr_of};
         let p = NonNull::<MigraphxProviderOptionsRaw>::dangling().as_ptr();
         let base = p as usize;
         macro_rules! off {
@@ -1045,7 +1049,7 @@ mod tests {
     /// (`addr_of!` never reads through the dangling pointer, so this is sound.)
     #[test]
     fn openvino_struct_layout() {
-        use core::ptr::{addr_of, NonNull};
+        use core::ptr::{NonNull, addr_of};
         let p = NonNull::<OpenvinoProviderOptionsRaw>::dangling().as_ptr();
         let base = p as usize;
         macro_rules! off {

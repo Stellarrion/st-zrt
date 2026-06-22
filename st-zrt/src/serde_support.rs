@@ -13,7 +13,7 @@
 //! they are intentionally **not** serializable. The serializable EP config is
 //! [`crate::ep::EpConfig`] (the queued key/value path) plus the flat-struct EP options
 //! (`MigraphxOptions`, `OpenvinoOptions`).
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::ffi::CString;
 
 /// (De)serialize `Option<CString>` as `Option<String>`.
@@ -101,7 +101,7 @@ pub mod graph_opt {
             i => {
                 return Err(de::Error::custom(format!(
                     "unknown GraphOptimizationLevel discriminant: {i}"
-                )))
+                )));
             },
         })
     }

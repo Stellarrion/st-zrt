@@ -3,7 +3,7 @@
 //! [`crate::Session::run`] / [`crate::Session::run_binding`]); for per-call config or
 //! cancellation, build a `RunOptions` and pass it to
 //! [`crate::Session::run_with`] / [`crate::Session::run_binding_with`].
-use crate::{api, check, sys, Error, Result};
+use crate::{Error, Result, api, check, sys};
 use std::ffi::CString;
 use std::ptr;
 

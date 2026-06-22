@@ -7,7 +7,7 @@
 //! use-after-free (the root cause of the historical ">4MB segfault"; see RESULTS.md §8).
 //! Because the Session owns an `Arc` ref, that UAF can no longer occur regardless of how a
 //! caller scopes its `Environment`.
-use crate::{api, check, sys, Error, Result};
+use crate::{Error, Result, api, check, sys};
 use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;

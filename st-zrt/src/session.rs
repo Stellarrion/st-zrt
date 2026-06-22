@@ -14,14 +14,14 @@ use crate::prepacked::{PrepackedWeightsContainer, PrepackedWeightsInner};
 use crate::run_options::RunOptions;
 use crate::session_options::SessionOptions;
 use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer};
-use crate::{api, check, sys, Error, Result};
+use crate::{Error, Result, api, check, sys};
 use futures_util::task::AtomicWaker;
 use std::cell::UnsafeCell;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::marker::PhantomData;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const STACK_IO_HANDLES: usize = 8;
 const AUTO_ALIGNED_BUFFER_THRESHOLD_BYTES: usize = 1 << 20;
@@ -2004,38 +2004,40 @@ unsafe extern "C" fn run_async_callback(
     user_data: *mut c_void, outputs: *mut *mut sys::ValueHandle, num_outputs: usize,
     status: sys::StatusPtr,
 ) {
-    // Recover the Arc ref we passed via `into_raw`. (Null can't happen — we always pass one.)
-    let state: Arc<AsyncState> = unsafe { Arc::from_raw(user_data as *const AsyncState) };
+    unsafe {
+        // Recover the Arc ref we passed via `into_raw`. (Null can't happen — we always pass one.)
+        let state: Arc<AsyncState> = Arc::from_raw(user_data as *const AsyncState);
 
-    let result: Result<Vec<OwnedValue>> =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // Consume the status: null ⇒ success; non-null ⇒ `check` frees it and yields the Err.
-            if !status.is_null() {
-                return Err(match check(status) {
-                    Err(e) => e,
-                    Ok(()) => crate::Error::new(
-                        sys::OrtErrorCode::Fail as i32,
-                        "RunAsync returned a non-null but Ok status",
-                    ),
-                });
-            }
-            if outputs.is_null() {
-                return Ok(Vec::new());
-            }
-            let handles = std::slice::from_raw_parts(outputs, num_outputs);
-            OwnedValue::collect_from_raw(handles)
-        }))
-        .unwrap_or_else(|_| {
-            Err(crate::Error::new(
-                sys::OrtErrorCode::Fail as i32,
-                "panic in RunAsync callback",
-            ))
-        });
+        let result: Result<Vec<OwnedValue>> =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                // Consume the status: null ⇒ success; non-null ⇒ `check` frees it and yields the Err.
+                if !status.is_null() {
+                    return Err(match check(status) {
+                        Err(e) => e,
+                        Ok(()) => crate::Error::new(
+                            sys::OrtErrorCode::Fail as i32,
+                            "RunAsync returned a non-null but Ok status",
+                        ),
+                    });
+                }
+                if outputs.is_null() {
+                    return Ok(Vec::new());
+                }
+                let handles = std::slice::from_raw_parts(outputs, num_outputs);
+                OwnedValue::collect_from_raw(handles)
+            }))
+            .unwrap_or_else(|_| {
+                Err(crate::Error::new(
+                    sys::OrtErrorCode::Fail as i32,
+                    "panic in RunAsync callback",
+                ))
+            });
 
-    state.complete(result);
+        state.complete(result);
 
-    // The input/output arrays are owned by the `Arc` state — freed when its last ref drops
-    // (the callback's here + the future's), not here. `state` drops its ref at end of scope.
+        // The input/output arrays are owned by the `Arc` state — freed when its last ref drops
+        // (the callback's here + the future's), not here. `state` drops its ref at end of scope.
+    }
 }
 
 fn add_owned_initializers(

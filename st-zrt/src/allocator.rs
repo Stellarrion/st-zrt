@@ -2,7 +2,7 @@
 //! [`Allocator::create`] allocator is session-scoped and owned (released on drop).
 use crate::memory::MemoryInfo;
 use crate::session::Session;
-use crate::{api, check, sys, Result};
+use crate::{Result, api, check, sys};
 use std::ffi::c_void;
 use std::ptr;
 
@@ -150,7 +150,7 @@ impl Allocator {
 
     /// Free a buffer the engine allocated and handed back (e.g. an I/O name string).
     pub(crate) unsafe fn free(&self, p: *mut c_void) -> Result<()> {
-        check(api().allocator_free()(self.alloc, p))
+        unsafe { check(api().allocator_free()(self.alloc, p)) }
     }
 }
 

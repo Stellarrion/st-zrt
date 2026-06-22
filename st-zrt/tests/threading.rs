@@ -2,8 +2,8 @@ use st_zrt::{
     Environment, GraphOptimizationLevel, LoggingLevel, Session, SessionOptions, ThreadManager,
     ThreadingOptions,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 
 fn upsample_path() -> std::path::PathBuf {

@@ -17,8 +17,8 @@ use std::os::raw::c_char;
 #[cfg(feature = "custom-ops")]
 use std::os::raw::c_int;
 
-/// libonnxruntime API version we bind (1.26.0 → API version 26).
-pub const API_VERSION: u32 = 26;
+/// libonnxruntime API version we bind (1.27.0 → API version 27).
+pub const API_VERSION: u32 = 27;
 
 // ─── opaque-handle macro (the generated table invokes this) ──────────────────
 macro_rules! opaque_handle {
@@ -63,6 +63,9 @@ pub enum ElementType {
     Uint4 = 21,
     Int4 = 22,
     Float4E2M1 = 23,
+    Uint2 = 24,
+    Int2 = 25,
+    Float8E8M0 = 26,
 }
 
 /// OrtLoggingLevel (a.k.a. LogLevel).
@@ -146,6 +149,19 @@ pub enum SparseIndicesFormat {
 pub enum ExecutionMode {
     Sequential = 0,
     Parallel = 1,
+}
+
+/// OrtExecutionProviderDevicePolicy.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionProviderDevicePolicy {
+    Default = 0,
+    PreferCpu = 1,
+    PreferNpu = 2,
+    PreferGpu = 3,
+    MaxPerformance = 4,
+    MaxEfficiency = 5,
+    MinOverallPower = 6,
 }
 
 /// OrtErrorCode — the status code `GetErrorCode` returns and `CreateStatus` accepts
@@ -336,8 +352,10 @@ pub struct ApiBase {
 impl ApiBase {
     #[inline]
     pub unsafe fn version_string(&self) -> Option<&'static std::ffi::CStr> {
-        let f = self.get_version_string?;
-        Some(std::ffi::CStr::from_ptr(f()))
+        unsafe {
+            let f = self.get_version_string?;
+            Some(std::ffi::CStr::from_ptr(f()))
+        }
     }
 }
 
@@ -352,21 +370,25 @@ impl Api {
     /// Read the raw function pointer at positional index `idx`.
     #[inline]
     pub unsafe fn fn_ptr(&self, idx: usize) -> *const c_void {
-        (self as *const Self as *const *const c_void)
-            .add(idx)
-            .read()
+        unsafe {
+            (self as *const Self as *const *const c_void)
+                .add(idx)
+                .read()
+        }
     }
 
     /// Typed accessor used by every generated wrapper: null-check the slot, then
     /// reinterpret the data pointer as the fn-pointer type `T`.
     #[inline]
     unsafe fn f<T: Copy>(&self, idx: usize) -> T {
-        let p = self.fn_ptr(idx);
-        assert!(
-            !p.is_null(),
-            "st-zrt-sys: Api[{idx}] is null — header/version mismatch"
-        );
-        std::mem::transmute_copy(&p)
+        unsafe {
+            let p = self.fn_ptr(idx);
+            assert!(
+                !p.is_null(),
+                "st-zrt-sys: Api[{idx}] is null — header/version mismatch"
+            );
+            std::mem::transmute_copy(&p)
+        }
     }
 }
 
@@ -376,7 +398,7 @@ impl Api {
 pub mod generated;
 
 // ─── entry point (the one C symbol we link by name) ──────────────────────────
-extern "C" {
+unsafe extern "C" {
     #[link_name = "OrtGetApiBase"]
     fn get_api_base_ffi() -> *const ApiBase;
 }
@@ -401,7 +423,10 @@ pub fn api() -> *const Api {
         );
         let get_api = (*base).get_api.expect("st-zrt-sys: GetApi missing");
         let api = get_api(API_VERSION);
-        assert!(!api.is_null(), "st-zrt-sys: GetApi({API_VERSION}) returned null — version mismatch with libonnxruntime");
+        assert!(
+            !api.is_null(),
+            "st-zrt-sys: GetApi({API_VERSION}) returned null — version mismatch with libonnxruntime"
+        );
         api
     }
 }
@@ -412,18 +437,20 @@ pub fn api() -> *const Api {
 pub unsafe fn status_to_result(
     api: &Api, status: generated::StatusPtr,
 ) -> Result<(), (i32, std::ffi::CString)> {
-    if status.is_null() {
-        return Ok(());
+    unsafe {
+        if status.is_null() {
+            return Ok(());
+        }
+        let code = api.get_error_code()(status as *const generated::StatusHandle);
+        let msg_ptr = api.get_error_message()(status as *const generated::StatusHandle);
+        let msg = if msg_ptr.is_null() {
+            std::ffi::CString::new("(null error message)").unwrap()
+        } else {
+            std::ffi::CStr::from_ptr(msg_ptr).to_owned()
+        };
+        api.release_status()(status);
+        Err((code, msg))
     }
-    let code = api.get_error_code()(status as *const generated::StatusHandle);
-    let msg_ptr = api.get_error_message()(status as *const generated::StatusHandle);
-    let msg = if msg_ptr.is_null() {
-        std::ffi::CString::new("(null error message)").unwrap()
-    } else {
-        std::ffi::CStr::from_ptr(msg_ptr).to_owned()
-    };
-    api.release_status()(status);
-    Err((code, msg))
 }
 
 // Re-export the generated table at the crate root so callers use `st_zrt_sys::IDX_RUN`
@@ -444,7 +471,7 @@ mod tests {
         if let Some(vs) = unsafe { (*base).version_string() } {
             let s = vs.to_string_lossy();
             eprintln!("onnxruntime: {s}");
-            assert!(s.contains("1.26"), "unexpected ort version: {s}");
+            assert!(s.contains("1.27"), "unexpected ort version: {s}");
         }
     }
 
@@ -459,7 +486,22 @@ mod tests {
             assert!(st.is_null(), "CreateSessionOptions failed");
             assert!(!opts.is_null(), "CreateSessionOptions gave null handle");
             api_ref.release_session_options()(opts);
-            eprintln!("generated_indices_functionally_validated: CreateSessionOptions(10) + Release(100) OK");
+            eprintln!(
+                "generated_indices_functionally_validated: CreateSessionOptions(10) + Release(100) OK"
+            );
+        }
+    }
+
+    /// Exhaustive table-shape proof for ORT 1.27: every generated `OrtApi` field index
+    /// is present in the live `GetApi(27)` table. This catches header/table drift before
+    /// any safe wrapper reaches a null slot.
+    #[test]
+    fn generated_api_table_slots_are_non_null() {
+        unsafe {
+            let api_ref = &*api();
+            for idx in 0..=generated::IDX_SESSION_RELEASE_CAPTURED_GRAPH {
+                assert!(!api_ref.fn_ptr(idx).is_null(), "OrtApi slot {idx} is null");
+            }
         }
     }
 
@@ -494,7 +536,7 @@ mod tests {
     }
 
     /// The four sub-API gateway getters (model-editor feature) must return non-null at
-    /// API version 26 — proves the gateway indices are correct and that ORT populates the
+    /// API version 27 — proves the gateway indices are correct and that ORT populates the
     /// OrtModelEditorApi / OrtCompileApi / OrtEpApi / OrtInteropApi function tables. A
     /// wrong index crashes; a null means ORT didn't populate that sub-API.
     #[cfg(feature = "model-editor")]

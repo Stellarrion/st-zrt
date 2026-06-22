@@ -442,6 +442,7 @@ fn map_base(b: &str) -> String {
         "OrtAllocatorType" => "AllocatorType".into(),
         "OrtMemType" => "MemType".into(),
         "OrtLoggingLevel" => "LoggingLevel".into(),
+        "OrtExecutionProviderDevicePolicy" => "ExecutionProviderDevicePolicy".into(),
         "GraphOptimizationLevel" => "GraphOptimizationLevel".into(),
         "ONNXTensorElementDataType" => "ElementType".into(),
         "ONNXType" => "OnnxType".into(),
@@ -449,7 +450,17 @@ fn map_base(b: &str) -> String {
         "OrtSparseIndicesFormat" => "SparseIndicesFormat".into(),
         "ExecutionMode" => "ExecutionMode".into(),
         "OrtLanguageProjection" => "i32".into(),
-        "OrtDeviceMemoryType" | "OrtHardwareDeviceType" => "i32".into(),
+        "OrtCompiledModelCompatibility"
+        | "OrtCompileApiFlags"
+        | "OrtCudnnConvAlgoSearch"
+        | "OrtCustomOpInputOutputCharacteristic"
+        | "OrtDeviceEpIncompatibilityReason"
+        | "OrtDeviceMemoryType"
+        | "OrtExternalMemoryHandleType"
+        | "OrtExternalSemaphoreType"
+        | "OrtGraphicsApi"
+        | "OrtHardwareDeviceType"
+        | "OrtMemoryInfoDeviceType" => "i32".into(),
         // callbacks (hand-mapped typedefs in lib.rs)
         "OrtLoggingFunction" => "LoggingFunction".into(),
         "OrtThreadWorkerFn" => "ThreadWorkerFn".into(),
@@ -459,6 +470,9 @@ fn map_base(b: &str) -> String {
         // RunAsync callback: a top-level fn-pointer typedef used as a by-value param. Map it
         // to the real fn-pointer type so `RunAsync` is directly callable (not opaque c_void).
         "RunAsyncCallbackFn" => "Option<unsafe extern \"C\" fn(*mut core::ffi::c_void, *mut *mut ValueHandle, usize, StatusPtr)>".into(),
+        // EP device selection callback: a top-level fn-pointer typedef used as a by-value
+        // param. `selected` is an inout caller-provided array of `const OrtEpDevice*`.
+        "EpSelectionDelegate" => "Option<unsafe extern \"C\" fn(*const *const EpDeviceHandle, usize, *const KeyValuePairsHandle, *const KeyValuePairsHandle, *mut *const EpDeviceHandle, usize, *mut usize, *mut core::ffi::c_void) -> StatusPtr>".into(),
         // ORT handle types: strip "Ort", append "Handle".
         other if other.starts_with("Ort") => format!("{}Handle", &other[3..]),
         // Fallback: opaque.
@@ -684,7 +698,7 @@ fn emit_field(f: &Field, feature: Option<&str>) -> String {
     format!(
         "// {c_sig}\n{cfg}pub const IDX_{screaming}: usize = {idx};\n\
          {cfg}pub type {pascal}Fn = unsafe extern \"C\" fn({params}) -> {ret};\n\
-         {cfg}impl Api {{\n  #[inline]\n  {cfg}pub unsafe fn {snake}(&self) -> {pascal}Fn {{ self.f(IDX_{screaming}) }}\n}}\n\n",
+         {cfg}impl Api {{\n  #[inline]\n  {cfg}pub unsafe fn {snake}(&self) -> {pascal}Fn {{ unsafe {{ self.f(IDX_{screaming}) }} }}\n}}\n\n",
         c_sig = f.c_sig,
         cfg = cfg,
         screaming = screaming,

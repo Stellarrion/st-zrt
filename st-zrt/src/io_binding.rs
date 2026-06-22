@@ -6,10 +6,10 @@ use crate::allocator::Allocator;
 use crate::element::TensorElement;
 use crate::memory::MemoryInfo;
 use crate::session::Session;
-use crate::tensor::{tensor_memory_info, AllocatedTensor, OwnedValue, RunInput, TensorBuffer};
+use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer, tensor_memory_info};
 use crate::type_info::checked_element_count;
-use crate::{api, check, sys, Error, Result};
-use std::ffi::{c_void, CString};
+use crate::{Error, Result, api, check, sys};
+use std::ffi::{CString, c_void};
 use std::marker::PhantomData;
 use std::ptr;
 

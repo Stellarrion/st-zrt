@@ -1,8 +1,8 @@
 //! ORT global thread-pool configuration.
 
-use crate::{api, check, sys, Error, Result};
+use crate::{Error, Result, api, check, sys};
 use std::any::Any;
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::ptr;
 
 /// User-supplied thread manager for ORT global thread pools.

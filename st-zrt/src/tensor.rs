@@ -4,10 +4,10 @@ use crate::allocator::Allocator;
 use crate::element::TensorElement;
 use crate::error::Error;
 use crate::memory::MemoryInfo;
-use crate::type_info::{checked_element_count, tensor_type_and_shape, TensorTypeAndShapeInfo};
-use crate::{api, check, element_size, sys, Result};
-use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
-use std::ffi::{c_char, c_int, c_void, CString};
+use crate::type_info::{TensorTypeAndShapeInfo, checked_element_count, tensor_type_and_shape};
+use crate::{Result, api, check, packed_element_bits, sys, tensor_byte_len};
+use std::alloc::{Layout, alloc_zeroed, dealloc, handle_alloc_error};
+use std::ffi::{CString, c_char, c_int, c_void};
 use std::fs::File;
 use std::marker::PhantomData;
 #[cfg(target_os = "linux")]
@@ -66,6 +66,14 @@ impl<'a> TensorView<'a> {
         self.tensor_type_and_shape()?.element_count()
     }
 
+    /// Total numeric tensor backing-buffer size in bytes.
+    ///
+    /// Uses ORT's `GetTensorSizeInBytes`, so packed sub-byte tensor storage is measured by the
+    /// engine. ORT returns an error for string tensors and non-tensor values.
+    pub fn byte_len(&self) -> Result<usize> {
+        tensor_value_byte_len(self.value as *const sys::ValueHandle)
+    }
+
     /// Dimensions of the tensor.
     pub fn dims(&self) -> Result<Vec<i64>> {
         self.tensor_type_and_shape()?.dims()
@@ -97,6 +105,17 @@ impl<'a> TensorView<'a> {
         // SAFETY: `data` is a contiguous, aligned buffer of `count` elements of T, owned by
         // the value and live for at least the lifetime of this borrow.
         Ok(unsafe { std::slice::from_raw_parts(data as *const T, count) })
+    }
+
+    /// Zero-copy read as raw bytes. For packed 2-bit/4-bit tensors this returns the packed
+    /// backing storage; use [`Self::element_type`] to interpret the bit layout.
+    pub fn as_bytes(&self) -> Result<&[u8]> {
+        let n = self.byte_len()?;
+        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        let mut data: *mut c_void = ptr::null_mut();
+        check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
+        let data = crate::slice_data_ptr(data as *mut u8, n, "tensor data")?;
+        Ok(unsafe { std::slice::from_raw_parts(data as *const u8, n) })
     }
 }
 
@@ -137,6 +156,39 @@ impl<'a> Tensor<'a> {
             )
         })?;
         let value = crate::ensure_non_null(value, "tensor value")?;
+        Ok(Self {
+            view: TensorView {
+                value,
+                _life: PhantomData,
+            },
+        })
+    }
+
+    /// Wrap an already-packed sub-byte tensor as a zero-copy ORT value.
+    ///
+    /// `elem_type` must be one of `Uint4`, `Int4`, `Float4E2M1`, `Uint2`, or `Int2`.
+    /// `buf` length is validated against `ceil(product(shape) * bits_per_element / 8)`.
+    /// The bit/nibble value layout is ORT/ONNX packed storage; ZRT intentionally exposes it as
+    /// bytes instead of pretending each logical element is a Rust scalar.
+    /// ORT may still reject creation for packed metadata types it can report but not wrap.
+    pub fn from_packed_bytes(
+        buf: &'a [u8], shape: &[i64], elem_type: sys::ElementType, mem: &MemoryInfo,
+    ) -> Result<Self> {
+        validate_packed_bytes_len(shape, elem_type, buf.len())?;
+        ensure_memory_host_accessible(mem)?;
+        let mut value: *mut sys::ValueHandle = ptr::null_mut();
+        check(unsafe {
+            api().create_tensor_with_data_as_ort_value()(
+                mem.info as *const sys::MemoryInfoHandle,
+                buf.as_ptr() as *mut c_void,
+                buf.len(),
+                shape.as_ptr(),
+                shape.len(),
+                elem_type,
+                &mut value,
+            )
+        })?;
+        let value = crate::ensure_non_null(value, "packed tensor value")?;
         Ok(Self {
             view: TensorView {
                 value,
@@ -1064,12 +1116,42 @@ fn validate_shape_len(shape: &[i64], len: usize) -> Result<()> {
     Ok(())
 }
 
+fn validate_packed_bytes_len(shape: &[i64], elem_type: sys::ElementType, len: usize) -> Result<()> {
+    if packed_element_bits(elem_type).is_none() {
+        return Err(Error::new(
+            -1,
+            format!(
+                "zrt: {:?} is not a packed sub-byte tensor element type",
+                elem_type
+            ),
+        ));
+    }
+    let count = shape_element_count(shape)?;
+    let expected = tensor_byte_len(elem_type, count)?;
+    if expected != len {
+        return Err(Error::new(
+            -1,
+            format!(
+                "packed {:?} tensor shape expects {expected} bytes for {count} elements, got {len}",
+                elem_type
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn tensor_memory_info(
     value: *const sys::ValueHandle,
 ) -> Result<crate::memory::MemoryInfoSnapshot> {
     let mut info: *const sys::MemoryInfoHandle = ptr::null();
     check(unsafe { api().get_tensor_memory_info()(value, &mut info) })?;
     crate::memory::snapshot_from_ptr(info)
+}
+
+fn tensor_value_byte_len(value: *const sys::ValueHandle) -> Result<usize> {
+    let mut bytes = 0usize;
+    check(unsafe { api().get_tensor_size_in_bytes()(value, &mut bytes) })?;
+    Ok(bytes)
 }
 
 fn ensure_value_host_accessible(value: *const sys::ValueHandle) -> Result<()> {
@@ -1678,11 +1760,18 @@ impl OwnedValue {
     pub fn element_count(&self) -> usize {
         self.count
     }
-    /// Total backing-buffer size in bytes (element_count × element_size; 0 for strings).
+    /// Total numeric tensor backing-buffer size in bytes.
+    ///
+    /// Uses ORT's `GetTensorSizeInBytes`, so packed sub-byte tensor storage is measured by the
+    /// engine. ORT returns an error for string tensors and non-tensor values.
     pub fn byte_len(&self) -> Result<usize> {
-        self.count
-            .checked_mul(element_size(self.elem_type))
-            .ok_or_else(|| Error::new(-1, "tensor byte length overflows usize"))
+        if self.onnx_type != sys::OnnxType::Tensor {
+            return Err(Error::new(
+                -1,
+                format!("zrt: byte_len on a non-tensor ({:?}) value", self.onnx_type),
+            ));
+        }
+        tensor_value_byte_len(self.value as *const sys::ValueHandle)
     }
 
     /// Number of elements in a SEQUENCE value (always 2 for a MAP: index 0 = keys,
@@ -1757,7 +1846,8 @@ impl OwnedValue {
         Ok(unsafe { std::slice::from_raw_parts(data as *const T, self.count) })
     }
 
-    /// Zero-copy read as raw bytes (no element-type assertion).
+    /// Zero-copy read as raw bytes (no element-type assertion). For packed 2-bit/4-bit tensors
+    /// this returns the packed backing storage.
     pub fn as_bytes(&self) -> Result<&[u8]> {
         let n = self.byte_len()?;
         ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
@@ -1865,7 +1955,29 @@ mod tests {
         assert_eq!(v.element_type().unwrap(), sys::ElementType::Float);
         assert_eq!(v.element_count().unwrap(), 4);
         assert_eq!(v.dims().unwrap(), vec![2, 2]);
+        assert_eq!(v.byte_len().unwrap(), std::mem::size_of_val(&buf));
+        assert_eq!(v.as_bytes().unwrap().len(), std::mem::size_of_val(&buf));
         assert_eq!(v.as_slice::<f32>().unwrap(), &buf[..]);
+    }
+
+    #[test]
+    fn packed_sub_byte_tensor_wraps_and_reads_raw_bytes() {
+        let mem = MemoryInfo::cpu().unwrap();
+        let bytes = [0x21, 0x43];
+        let v = Tensor::from_packed_bytes(&bytes, &[4], sys::ElementType::Uint4, &mem).unwrap();
+        assert_eq!(v.element_type().unwrap(), sys::ElementType::Uint4);
+        assert_eq!(v.element_count().unwrap(), 4);
+        assert_eq!(v.byte_len().unwrap(), bytes.len());
+        assert_eq!(v.as_bytes().unwrap(), &bytes);
+        assert!(v.as_slice::<u8>().is_err());
+    }
+
+    #[test]
+    fn packed_sub_byte_tensor_validates_storage_length() {
+        let mem = MemoryInfo::cpu().unwrap();
+        assert!(Tensor::from_packed_bytes(&[0], &[4], sys::ElementType::Uint4, &mem).is_err());
+        assert!(validate_packed_bytes_len(&[4], sys::ElementType::Uint2, 1).is_ok());
+        assert!(Tensor::from_packed_bytes(&[0], &[1], sys::ElementType::Uint8, &mem).is_err());
     }
 
     #[test]
@@ -2077,5 +2189,6 @@ mod tests {
         // transfer — `st` remains the sole owner and releases the value on drop).
         let got = read_string_tensor(st.value as *const sys::ValueHandle, words.len()).unwrap();
         assert_eq!(got, words);
+        assert!(tensor_value_byte_len(st.value as *const sys::ValueHandle).is_err());
     }
 }

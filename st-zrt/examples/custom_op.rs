@@ -14,7 +14,7 @@
 //! cargo run --example custom_op --features custom-ops
 //! ```
 use st_zrt::{
-    custom_op, CustomOp, CustomOpDomain, KernelContext, KernelInfo, OpIoSpec, SessionOptions,
+    CustomOp, CustomOpDomain, KernelContext, KernelInfo, OpIoSpec, SessionOptions, custom_op,
 };
 
 /// A `com.example::MyRelu` custom op: float in, float out (compile-verified kernel body).

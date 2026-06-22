@@ -22,8 +22,8 @@
 //! `mem::forget` the moved wrapper on success (the graph/model now owns the handle); on error
 //! the wrapper drops normally and releases. [`crate::Session::from_model`] BORROWS the model
 //! (released when the [`Model`] drops).
-use crate::{api, check, sys, Result, RunInput};
-use std::ffi::{c_char, c_void, CString};
+use crate::{Result, RunInput, api, check, sys};
+use std::ffi::{CString, c_char, c_void};
 use std::ptr;
 
 /// The graph/model-editing sub-API (`GetModelEditorApi`). Process-static; `None` only if

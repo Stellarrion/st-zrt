@@ -3,19 +3,20 @@
 //!
 //! Pipeline (pure Rust, no shell-outs): pin a version that mirrors libonnxruntime →
 //! fetch the official onnxruntime C/C++ release package over HTTPS (ureq + rustls) →
-//! SHA-256 verify (sha2) → extract (flate2+tar for `.tgz`, zip for `.zip`) → link +
+//! SHA-256 verify (sha2) → extract (flate2+tar for `.tgz`) → link +
 //! set rpath so the dylib is found at runtime. The FFI types themselves are hand-written
 //! in src/.
 //!
 //! Supported CPU targets (all SHA-256 pinned, supply-chain verified):
-//!   linux-x64, linux-aarch64, osx-arm64, win-x64
-//! (ORT 1.26.0 ships no osx-x86_64 build.)
+//!   linux-x64, linux-aarch64, osx-arm64
+//! (ORT 1.27.0 ships no osx-x86_64 build, and no win-x64 CPU archive on GitHub releases —
+//! Windows-x64 CPU users must supply ST_ZRT_ORT_PATH or the NuGet Microsoft.ML.OnnxRuntime.)
 //!
-//! GPU (feature `cuda`): downloads the GPU libonnxruntime (linux-x64-gpu) + the CUDA 12.x
-//! runtime libs (nvidia cu12 wheels, SHA-256 pinned) and rpaths them, so `cargo build
-//! --features cuda` produces a binary that runs on an NVIDIA GPU with no manual setup. ORT
-//! 1.26's CUDA EP is built for CUDA 12.x (the host toolkit version is irrelevant at runtime);
-//! cuDNN 9 must be on the system. Override the CUDA libs with ST_ZRT_CUDA12_PATH.
+//! GPU (feature `cuda`): downloads the GPU libonnxruntime (linux-x64-gpu_cuda13) and rpaths a
+//! system CUDA 13.x toolkit. ORT 1.27 deprecated the CUDA 12 packages and ships a CUDA 13 GPU
+//! build; nvidia-*-cu13 wheels are not yet published on PyPI, so the CUDA 13 runtime libs are
+//! expected on the host. They are resolved from ST_ZRT_CUDA13_PATH → CUDA_PATH → /opt/cuda
+//! (default), and cuDNN 9 (`libcudnn.so.9`) must also be present on the system.
 //!
 //! Override: set `ST_ZRT_ORT_PATH=/path/to/onnxruntime` (an already-extracted dir with
 //! `include/` and `lib/`) to skip downloading entirely.
@@ -32,7 +33,7 @@ use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
 /// Mirrors libonnxruntime exactly. Bumping this = a new release of st-zrt-sys.
-const ORT_VERSION: &str = "1.26.0";
+const ORT_VERSION: &str = "1.27.0";
 
 /// Resolve the release asset for a target triple: `(slug, extension, pinned sha256)`.
 /// Every supported target is pinned — a mismatch fails the build (supply-chain gate).
@@ -45,17 +46,17 @@ fn asset_for(target: &str, gpu: bool) -> (&'static str, &'static str, &'static s
         target.contains("aarch64"),
     );
     if gpu {
-        // GPU libonnxruntime (CUDA EP). v0.1: linux-x64 only (tested on an RTX 4090).
+        // GPU libonnxruntime (CUDA EP, CUDA 13). linux-x64 only.
         if linux && x86_64 {
             return (
-                "linux-x64-gpu",
+                "linux-x64-gpu_cuda13",
                 "tgz",
-                "cb7df7ee2ca0f962c7ce7c839aeae36223d146a91fb4646d62fb0046f297479f",
+                "1a3227e1dc2f53d9f877c93278af500b15e26d99aa5ade877692138b3ab7d351",
             );
         }
         panic!(
             "st-zrt-sys: `cuda` feature needs the GPU libonnxruntime; ORT {ORT_VERSION} ships a \
-             tested linux-x64-gpu build only in v0.1 (got TARGET '{target}'). Set ST_ZRT_ORT_PATH \
+             tested linux-x64-gpu_cuda13 build only (got TARGET '{target}'). Set ST_ZRT_ORT_PATH \
              to a pre-extracted GPU onnxruntime."
         );
     }
@@ -63,26 +64,26 @@ fn asset_for(target: &str, gpu: bool) -> (&'static str, &'static str, &'static s
         (
             "linux-x64",
             "tgz",
-            "1254da24fb389cf39dc0ff3451ab48301740ffbfcbaf646849df92f80ee92c57",
+            "547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f",
         )
     } else if linux && aarch64 {
         (
             "linux-aarch64",
             "tgz",
-            "34ff1c2d0f12e2cf3d33a0c5f82e39792e1d581fbd6968fd7c30d173654be01a",
+            "3e4d83ac06924a32a07b6d7f91ce6f852876153fc0bbdf931bf517a140bfbe48",
         )
     } else if darwin && aarch64 {
         (
             "osx-arm64",
             "tgz",
-            "7a1280bbb1701ea514f71828765237e7896e0f2e1cd332f1f70dbd5c3e33aca3",
+            "545e81c58152353acb0d1e8bd6ce4b62f830c0961f5b3acfedc790ffd76e477a",
         )
     } else if windows && x86_64 {
-        (
-            "win-x64",
-            "zip",
-            "6ebe99b5564bf4d029b6e93eac9ff423682b6212eade769e9ca3f685eaf500b4",
-        )
+        panic!(
+            "st-zrt-sys: ORT {ORT_VERSION} publishes no win-x64 CPU archive on GitHub releases \
+             (Windows CPU is now win-arm64/arm64x only). Set ST_ZRT_ORT_PATH to a pre-extracted \
+             onnxruntime, or install the NuGet Microsoft.ML.OnnxRuntime package."
+        );
     } else if darwin && x86_64 {
         panic!(
             "st-zrt-sys: ORT {ORT_VERSION} ships no osx-x86_64 build (Apple Intel is unsupported by upstream). \
@@ -90,7 +91,7 @@ fn asset_for(target: &str, gpu: bool) -> (&'static str, &'static str, &'static s
         );
     } else {
         panic!(
-            "st-zrt-sys: TARGET '{target}' unsupported in v0.1 (linux-x64/aarch64, osx-arm64, win-x64). \
+            "st-zrt-sys: TARGET '{target}' unsupported (linux-x64/aarch64, osx-arm64). \
              Set ST_ZRT_ORT_PATH to an already-extracted onnxruntime dir."
         );
     }
@@ -137,123 +138,32 @@ fn extract_tgz(archive: &Path, dest: &Path) {
         .unwrap_or_else(|e| panic!("st-zrt-sys: unpack {}: {e}", archive.display()));
 }
 
-/// Extract a `.zip` into `dest` (no system unzip). Skips entries that escape `dest`.
-fn extract_zip(archive: &Path, dest: &Path) {
-    let f = fs::File::open(archive)
-        .unwrap_or_else(|e| panic!("st-zrt-sys: open {}: {e}", archive.display()));
-    let mut za = zip::ZipArchive::new(f)
-        .unwrap_or_else(|e| panic!("st-zrt-sys: read zip {}: {e}", archive.display()));
-    for i in 0..za.len() {
-        let mut entry = match za.by_index(i) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let Some(rel) = entry.enclosed_name() else {
-            continue;
-        };
-        let out = dest.join(rel);
-        if entry.is_dir() {
-            fs::create_dir_all(&out)
-                .unwrap_or_else(|e| panic!("st-zrt-sys: mkdir {}: {e}", out.display()));
-        } else {
-            if let Some(p) = out.parent() {
-                let _ = fs::create_dir_all(p);
-            }
-            let mut o = fs::File::create(&out)
-                .unwrap_or_else(|e| panic!("st-zrt-sys: create {}: {e}", out.display()));
-            io::copy(&mut entry, &mut o)
-                .unwrap_or_else(|e| panic!("st-zrt-sys: copy {}: {e}", out.display()));
-        }
-    }
-}
-
-/// CUDA 12.x runtime libs for the GPU build (feature `cuda`). The nvidia cu12 wheels are the
-/// canonical, reproducible source; each is SHA-256 pinned (supply-chain parity with the ORT
-/// packages). ORT 1.26's CUDA EP links libcudart/cublas/cufft/curand (+ nvjitlink); cuDNN 9 is
-/// expected on the system. `(name, files.pythonhosted.org url, sha256)`.
+/// Resolve the system CUDA 13 toolkit lib dir for the GPU build (feature `cuda`). The CUDA EP
+/// in ORT 1.27's `linux-x64-gpu_cuda13` package needs `libcudart.so.13`, `libcublas.so.13`,
+/// `libcufft.so.12`, `libcurand.so.10`, `libnvrtc.so.13` (and `libcudnn.so.9` on the system).
+/// `nvidia-*-cu13` wheels are not published on PyPI yet, so these libs must be present on the
+/// host. Resolution order: `ST_ZRT_CUDA13_PATH` → `CUDA_PATH` → `/opt/cuda`.
 #[cfg(feature = "cuda")]
-const CUDA12_WHEELS: &[(&str, &str, &str)] = &[
-    (
-        "cuda-runtime",
-        "https://files.pythonhosted.org/packages/bc/46/a92db19b8309581092a3add7e6fceb4c301a3fd233969856a8cbf042cd3c/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
-        "25bba2dfb01d48a9b59ca474a1ac43c6ebf7011f1b0b8cc44f54eb6ac48a96c3",
-    ),
-    (
-        "cublas",
-        "https://files.pythonhosted.org/packages/cb/c0/0a517bfe63ccd3b92eb254d264e28fca3c7cab75d07daea315250fb1bf73/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_x86_64.whl",
-        "e4f53a8ca8c5d6e8c492d0d0a3d565ecb59a751b19cfdaa4f6da0ab2104c1702",
-    ),
-    (
-        "cufft",
-        "https://files.pythonhosted.org/packages/95/f4/61e6996dd20481ee834f57a8e9dca28b1869366a135e0d42e2aa8493bdd4/nvidia_cufft_cu12-11.4.1.4-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
-        "c67884f2a7d276b4b80eb56a79322a95df592ae5e765cf1243693365ccab4e28",
-    ),
-    (
-        "curand",
-        "https://files.pythonhosted.org/packages/31/44/193a0e171750ca9f8320626e8a1f2381e4077a65e69e2fb9708bd479e34a/nvidia_curand_cu12-10.3.10.19-py3-none-manylinux_2_27_x86_64.whl",
-        "49b274db4780d421bd2ccd362e1415c13887c53c214f0d4b761752b8f9f6aa1e",
-    ),
-    (
-        "nvjitlink",
-        "https://files.pythonhosted.org/packages/46/0c/c75bbfb967457a0b7670b8ad267bfc4fffdf341c074e0a80db06c24ccfd4/nvidia_nvjitlink_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
-        "e3f1171dbdc83c5932a45f0f4c99180a70de9bd2718c1ab77d14104f6d7147f9",
-    ),
-];
-
-/// Download + SHA-256-verify the cu12 wheels and extract their `*.so*` into `out_dir/cuda12`.
-/// Cached via a marker file. Returns the cuda12 lib dir.
-#[cfg(feature = "cuda")]
-fn fetch_cuda12(out_dir: &Path) -> PathBuf {
-    let cuda12 = out_dir.join("cuda12");
-    let marker = out_dir.join("st-zrt-cuda12.done");
-    if !marker.exists() {
-        if cuda12.exists() {
-            let _ = fs::remove_dir_all(&cuda12);
-        }
-        fs::create_dir_all(&cuda12)
-            .unwrap_or_else(|e| panic!("st-zrt-sys: mkdir cuda12 {}: {e}", cuda12.display()));
-        for (name, url, expected) in CUDA12_WHEELS {
-            let whl = out_dir.join(format!("{name}.whl"));
-            if !whl.exists() {
-                println!("st-zrt-sys: downloading CUDA 12 wheel {name}");
-                download(url, &whl);
-            }
-            let got = sha256_file(&whl);
-            assert_eq!(
-                got, *expected,
-                "st-zrt-sys: SHA-256 mismatch for CUDA wheel {name}\n  expected {expected}\n  got      {got}\n  supply-chain verification FAILED"
-            );
-            extract_wheel_libs(&whl, &cuda12);
-        }
-        let _ = fs::File::create(&marker);
-    }
-    cuda12
-}
-
-/// Extract `nvidia/*/lib/*.so*` from a cu12 wheel (a zip) into `dest`, flattened by basename.
-#[cfg(feature = "cuda")]
-fn extract_wheel_libs(archive: &Path, dest: &Path) {
-    let f = fs::File::open(archive)
-        .unwrap_or_else(|e| panic!("st-zrt-sys: open wheel {}: {e}", archive.display()));
-    let mut za = zip::ZipArchive::new(f)
-        .unwrap_or_else(|e| panic!("st-zrt-sys: read wheel {}: {e}", archive.display()));
-    for i in 0..za.len() {
-        let mut entry = match za.by_index(i) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let name = entry.name().to_string();
-        if (name.ends_with(".so") || name.contains(".so.")) && name.contains("/lib/") {
-            let Some(fname) = Path::new(&name).file_name() else {
-                continue;
-            };
-            let out = dest.join(fname);
-            let mut o = fs::File::create(&out)
-                .unwrap_or_else(|e| panic!("st-zrt-sys: create {}: {e}", out.display()));
-            io::copy(&mut entry, &mut o)
-                .unwrap_or_else(|e| panic!("st-zrt-sys: copy {}: {e}", out.display()));
-        }
-    }
+fn resolve_cuda13_lib_dir(target: &str) -> PathBuf {
+    let root = env::var("ST_ZRT_CUDA13_PATH")
+        .map(PathBuf::from)
+        .or_else(|_| env::var("CUDA_PATH").map(PathBuf::from))
+        .unwrap_or_else(|_| PathBuf::from("/opt/cuda"));
+    let (libdir, probe_name) = if target.contains("windows") {
+        (root.join("Bin"), "cudart64_13.dll")
+    } else {
+        (root.join("lib64"), "libcudart.so.13")
+    };
+    let probe = libdir.join(probe_name);
+    assert!(
+        probe.exists(),
+        "st-zrt-sys: `cuda` feature needs a system CUDA 13 toolkit. \
+         Looked for {} (resolved from ST_ZRT_CUDA13_PATH → CUDA_PATH → /opt/cuda, got {}). \
+         nvidia-*-cu13 wheels are not on PyPI yet; install the CUDA 13.x runtime and cuDNN 9.",
+        probe.display(),
+        root.display()
+    );
+    libdir
 }
 
 fn main() {
@@ -261,7 +171,8 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let gpu = cfg!(feature = "cuda");
     println!("cargo:rerun-if-env-changed=ST_ZRT_ORT_PATH");
-    println!("cargo:rerun-if-env-changed=ST_ZRT_CUDA12_PATH");
+    println!("cargo:rerun-if-env-changed=ST_ZRT_CUDA13_PATH");
+    println!("cargo:rerun-if-env-changed=CUDA_PATH");
 
     let extract_dir = match env::var("ST_ZRT_ORT_PATH") {
         Ok(p) => PathBuf::from(p),
@@ -289,11 +200,7 @@ fn main() {
                 if extract_dir.exists() {
                     let _ = fs::remove_dir_all(&extract_dir);
                 }
-                if ext == "zip" {
-                    extract_zip(&archive, &out_dir);
-                } else {
-                    extract_tgz(&archive, &out_dir);
-                }
+                extract_tgz(&archive, &out_dir);
                 let extracted = out_dir.join(format!("onnxruntime-{slug}-{ORT_VERSION}"));
                 fs::rename(&extracted, &extract_dir)
                     .expect("st-zrt-sys: rename extracted onnxruntime dir");
@@ -341,25 +248,17 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib.display());
     }
 
-    // CUDA 12 runtime libs (feature `cuda`): download + SHA-256-verify the nvidia cu12 wheels
-    // and rpath their dir so the GPU libonnxruntime's CUDA provider resolves at runtime. ORT
-    // 1.26's CUDA EP is built for CUDA 12.x; the host toolkit version is irrelevant at runtime
-    // — only the matching libcudart.so.12 etc. matter (cuDNN 9 stays on the system). Override
-    // with ST_ZRT_CUDA12_PATH (a dir of libcudart.so.12 / libcublas.so.12 / …) to skip it.
+    // CUDA 13 runtime libs (feature `cuda`): resolve the system CUDA 13 toolkit lib dir and
+    // rpath it so the GPU libonnxruntime's CUDA provider (`libonnxruntime_providers_cuda.so`)
+    // resolves libcudart/libcublas/libcufft/libcurand/libnvrtc at runtime. cuDNN 9
+    // (`libcudnn.so.9`) must also be on the host. ORT 1.27's CUDA EP is built for CUDA 13.x;
+    // nvidia-*-cu13 wheels are not on PyPI yet, so the libs are expected on the system.
     #[cfg(feature = "cuda")]
     {
-        let cuda12 = match env::var("ST_ZRT_CUDA12_PATH") {
-            Ok(p) => PathBuf::from(p),
-            Err(_) => fetch_cuda12(&out_dir),
-        };
-        assert!(
-            cuda12.is_dir(),
-            "st-zrt-sys: cuda12 lib dir missing at {}",
-            cuda12.display()
-        );
-        println!("cargo:rustc-link-search=native={}", cuda12.display());
+        let cuda13 = resolve_cuda13_lib_dir(&target);
+        println!("cargo:rustc-link-search=native={}", cuda13.display());
         if !target.contains("msvc") {
-            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", cuda12.display());
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", cuda13.display());
         }
     }
 }

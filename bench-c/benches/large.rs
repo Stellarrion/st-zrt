@@ -7,10 +7,10 @@
 //! here and the failure was misattributed to an ORT BFCArena bug; re-investigation showed
 //! the crash does NOT reproduce with the current code, the st-zrt FFI matches the
 //! documented `CreateTensorWithDataAsOrtValue` contract, and libonnxruntime is pinned to
-//! v1.26.0 (SHA-256-verified) so the ORT binary is byte-identical — i.e. the crash was a
+//! v1.27.0 (SHA-256-verified) so the ORT binary is byte-identical — i.e. the crash was a
 //! st-zrt lifetime/handle bug, now fixed. The arena stays ON (the realistic default);
 //! `crash_repro.rs` and `examples/zc_repro.rs` lock that in as a regression guard.
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{
     Environment, GraphOptimizationLevel, MemoryInfo, OutputValue, SessionOptions, Tensor,
 };

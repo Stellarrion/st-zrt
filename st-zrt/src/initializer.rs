@@ -1,8 +1,8 @@
 //! Session initializers backed by caller-owned tensors.
 use crate::element::TensorElement;
 use crate::tensor::{RunInput, TensorBuffer};
-use crate::{sys, Error, Result};
-use std::ffi::{c_char, CString};
+use crate::{Error, Result, sys};
+use std::ffi::{CString, c_char};
 
 trait InitializerValue: Send + Sync {
     fn as_value_ptr(&self) -> *const sys::ValueHandle;
