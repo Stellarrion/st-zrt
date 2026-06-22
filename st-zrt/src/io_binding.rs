@@ -9,7 +9,7 @@ use crate::session::Session;
 use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer, tensor_memory_info};
 use crate::type_info::checked_element_count;
 use crate::{Error, Result, api, check, sys};
-use std::ffi::{CString, c_void};
+use std::ffi::{CStr, CString, c_void};
 use std::marker::PhantomData;
 use std::ptr;
 
@@ -147,7 +147,11 @@ impl IoBinding {
     /// Bind the input `name` to `input` (`BindInput`, idx 136).
     pub fn bind_input(&mut self, name: &str, input: &dyn RunInput) -> Result<()> {
         let cname = CString::new(name).map_err(|_| Error::new(-1, "input name contains a NUL"))?;
-        check(unsafe { api().bind_input()(self.binding, cname.as_ptr(), input.as_value_ptr()) })
+        self.bind_input_cstr(&cname, input)
+    }
+
+    pub(crate) fn bind_input_cstr(&mut self, name: &CStr, input: &dyn RunInput) -> Result<()> {
+        check(unsafe { api().bind_input()(self.binding, name.as_ptr(), input.as_value_ptr()) })
     }
 
     /// Bind the output `name` to a caller-owned buffer (zero-copy: ORT writes the result

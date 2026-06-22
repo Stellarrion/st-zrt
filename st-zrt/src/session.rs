@@ -9,11 +9,11 @@ use crate::element::TensorElement;
 use crate::environment::{EnvInner, Environment};
 use crate::initializer::OwnedInitializer;
 use crate::io_binding::{IoBinding, OutputValue};
-use crate::memory::MemoryInfo;
+use crate::memory::{MemoryInfo, MemoryInfoSnapshot};
 use crate::prepacked::{PrepackedWeightsContainer, PrepackedWeightsInner};
 use crate::run_options::RunOptions;
 use crate::session_options::SessionOptions;
-use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer};
+use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer, tensor_memory_info};
 use crate::{Error, Result, api, check, sys};
 use futures_util::task::AtomicWaker;
 use std::cell::UnsafeCell;
@@ -71,6 +71,35 @@ impl Default for LaneBufferPolicy {
     #[inline]
     fn default() -> Self {
         Self::Auto
+    }
+}
+
+impl LaneBufferPolicy {
+    /// Balanced default: cheap `Vec` for tiny tensors, prefaulted aligned buffers for larger
+    /// tensors, and hugepage-hinted prefaulted buffers at 2 MiB and above.
+    #[inline]
+    pub const fn balanced() -> Self {
+        Self::Auto
+    }
+
+    /// Low-latency preset for small or latency-sensitive lanes where setup should stay cheap.
+    #[inline]
+    pub const fn latency() -> Self {
+        Self::Prefaulted
+    }
+
+    /// Large-buffer throughput preset: 2 MiB alignment, best-effort hugepage hint, prefaulted.
+    #[inline]
+    pub const fn throughput_large() -> Self {
+        Self::HugePagePrefaulted
+    }
+
+    /// Host buffer candidate for device transfers: hugepage-hinted, prefaulted, and `mlock`ed
+    /// where supported. This is not CUDA pinned allocation; it is a conservative host-side
+    /// preset for callers that want resident staging buffers without changing allocator APIs.
+    #[inline]
+    pub const fn pinned_host_candidate() -> Self {
+        Self::HugePageMlockedPrefaulted
     }
 }
 
@@ -197,6 +226,31 @@ pub struct LaneRunAllocatorStats {
     pub after: AllocatorStats,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IoDirection {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionProviderDeviceSnapshot {
+    pub ep_name: String,
+    pub ep_vendor: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IoPlacement {
+    pub direction: IoDirection,
+    pub index: usize,
+    pub name: String,
+    pub onnx_type: sys::OnnxType,
+    pub element_type: sys::ElementType,
+    pub shape: Vec<i64>,
+    pub symbolic_dims: Vec<Option<String>>,
+    pub memory_info: MemoryInfoSnapshot,
+    pub ep_device: Option<ExecutionProviderDeviceSnapshot>,
+}
+
 impl LaneRunAllocatorStats {
     /// Numeric allocator-counter deltas between the before/after snapshots.
     #[inline]
@@ -284,6 +338,27 @@ fn lane_shape_bytes<T: TensorElement>(shape: &[i64]) -> Result<usize> {
     count
         .checked_mul(std::mem::size_of::<T>())
         .ok_or_else(|| Error::new(-1, "zrt: lane buffer byte size overflows usize"))
+}
+
+fn ep_device_snapshot_from_ptr(
+    ptr: *const sys::EpDeviceHandle,
+) -> Result<Option<ExecutionProviderDeviceSnapshot>> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    let raw_name = unsafe { api().ep_device__ep_name()(ptr) };
+    let ep_name = if raw_name.is_null() {
+        String::new()
+    } else {
+        unsafe { crate::cstr_to_string(raw_name, "execution provider device name")? }
+    };
+    let raw_vendor = unsafe { api().ep_device__ep_vendor()(ptr) };
+    let ep_vendor = if raw_vendor.is_null() {
+        String::new()
+    } else {
+        unsafe { crate::cstr_to_string(raw_vendor, "execution provider device vendor")? }
+    };
+    Ok(Some(ExecutionProviderDeviceSnapshot { ep_name, ep_vendor }))
 }
 
 impl Session {
@@ -709,6 +784,155 @@ impl Session {
             .symbolic)
     }
 
+    /// ORT's planned memory descriptor for input `i`.
+    pub fn input_memory_info(&self, i: usize) -> Result<MemoryInfoSnapshot> {
+        if i >= self.input_count() {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: input index {i} out of range ({} inputs)",
+                    self.input_count()
+                ),
+            ));
+        }
+        Ok(self.input_memory_infos()?.remove(i))
+    }
+
+    /// ORT's planned memory descriptor for output `i`.
+    pub fn output_memory_info(&self, i: usize) -> Result<MemoryInfoSnapshot> {
+        if i >= self.output_count() {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: output index {i} out of range ({} outputs)",
+                    self.output_count()
+                ),
+            ));
+        }
+        Ok(self.output_memory_infos()?.remove(i))
+    }
+
+    /// ORT's assigned EP device for input `i`, if ORT reports one.
+    pub fn input_ep_device(&self, i: usize) -> Result<Option<ExecutionProviderDeviceSnapshot>> {
+        if i >= self.input_count() {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: input index {i} out of range ({} inputs)",
+                    self.input_count()
+                ),
+            ));
+        }
+        Ok(self.input_ep_devices()?.remove(i))
+    }
+
+    /// ORT's assigned EP device for output `i`, if ORT reports one.
+    pub fn output_ep_device(&self, i: usize) -> Result<Option<ExecutionProviderDeviceSnapshot>> {
+        if i >= self.output_count() {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: output index {i} out of range ({} outputs)",
+                    self.output_count()
+                ),
+            ));
+        }
+        Ok(self.output_ep_devices()?.remove(i))
+    }
+
+    /// Snapshot of model I/O metadata plus ORT's memory/EP placement decisions.
+    ///
+    /// Diagnostic/setup API; may allocate. Do not call from the measured serving loop.
+    pub fn io_placement(&self) -> Result<Vec<IoPlacement>> {
+        let input_memory = self.input_memory_infos()?;
+        let output_memory = self.output_memory_infos()?;
+        let input_ep = self.input_ep_devices()?;
+        let output_ep = self.output_ep_devices()?;
+        let mut out = Vec::with_capacity(self.input_count() + self.output_count());
+
+        for i in 0..self.input_count() {
+            let meta = &self.input_meta[i];
+            out.push(IoPlacement {
+                direction: IoDirection::Input,
+                index: i,
+                name: self.input_name(i)?.to_owned(),
+                onnx_type: meta.onnx_type,
+                element_type: meta.elem_type,
+                shape: meta.dims.clone(),
+                symbolic_dims: meta.symbolic.clone(),
+                memory_info: input_memory[i].clone(),
+                ep_device: input_ep[i].clone(),
+            });
+        }
+        for i in 0..self.output_count() {
+            let meta = &self.output_meta[i];
+            out.push(IoPlacement {
+                direction: IoDirection::Output,
+                index: i,
+                name: self.output_name(i)?.to_owned(),
+                onnx_type: meta.onnx_type,
+                element_type: meta.elem_type,
+                shape: meta.dims.clone(),
+                symbolic_dims: meta.symbolic.clone(),
+                memory_info: output_memory[i].clone(),
+                ep_device: output_ep[i].clone(),
+            });
+        }
+        Ok(out)
+    }
+
+    fn input_memory_infos(&self) -> Result<Vec<MemoryInfoSnapshot>> {
+        let mut ptrs = vec![ptr::null(); self.input_count()];
+        check(unsafe {
+            api().session_get_memory_info_for_inputs()(
+                self.sess as *const sys::SessionHandle,
+                ptrs.as_mut_ptr() as *const *const sys::MemoryInfoHandle,
+                ptrs.len(),
+            )
+        })?;
+        ptrs.into_iter()
+            .map(crate::memory::snapshot_from_ptr)
+            .collect()
+    }
+
+    fn output_memory_infos(&self) -> Result<Vec<MemoryInfoSnapshot>> {
+        let mut ptrs = vec![ptr::null(); self.output_count()];
+        check(unsafe {
+            api().session_get_memory_info_for_outputs()(
+                self.sess as *const sys::SessionHandle,
+                ptrs.as_mut_ptr() as *const *const sys::MemoryInfoHandle,
+                ptrs.len(),
+            )
+        })?;
+        ptrs.into_iter()
+            .map(crate::memory::snapshot_from_ptr)
+            .collect()
+    }
+
+    fn input_ep_devices(&self) -> Result<Vec<Option<ExecutionProviderDeviceSnapshot>>> {
+        let mut ptrs = vec![ptr::null(); self.input_count()];
+        check(unsafe {
+            api().session_get_ep_device_for_inputs()(
+                self.sess as *const sys::SessionHandle,
+                ptrs.as_mut_ptr() as *const *const sys::EpDeviceHandle,
+                ptrs.len(),
+            )
+        })?;
+        ptrs.into_iter().map(ep_device_snapshot_from_ptr).collect()
+    }
+
+    fn output_ep_devices(&self) -> Result<Vec<Option<ExecutionProviderDeviceSnapshot>>> {
+        let mut ptrs = vec![ptr::null(); self.output_count()];
+        check(unsafe {
+            api().session_get_ep_device_for_outputs()(
+                self.sess as *const sys::SessionHandle,
+                ptrs.as_mut_ptr() as *const *const sys::EpDeviceHandle,
+                ptrs.len(),
+            )
+        })?;
+        ptrs.into_iter().map(ep_device_snapshot_from_ptr).collect()
+    }
+
     /// Run inference with the session's default (reused) `RunOptions`. `inputs` must be in
     /// session-input order (any mix of numeric [`crate::TensorView`] and [`crate::StringTensor`]);
     /// `outputs` receives one engine-owned value per session output. `run(&self)` is
@@ -762,6 +986,36 @@ impl Session {
     ) -> Result<PreparedIoBinding<'s, 'v>> {
         self.check_input_count(inputs.len())?;
         self.check_output_count(outputs.len(), "output count")?;
+        let mut binding = IoBinding::new(self)?;
+        for (i, input) in inputs.iter().enumerate() {
+            binding.bind_input(self.input_name(i)?, *input)?;
+        }
+        for (i, output) in outputs.iter().enumerate() {
+            binding.bind_output_buffer(self.output_name(i)?, output)?;
+        }
+        Ok(PreparedIoBinding {
+            session: self,
+            binding,
+            _values: PhantomData,
+        })
+    }
+
+    /// Fixed-arity variant of [`Self::prepare_io_binding_buffers`].
+    ///
+    /// This is the direct caller-owned-output migration path for code that currently uses
+    /// [`Self::run`] but already has stable input and output tensors. For pooled serving lanes,
+    /// prefer [`Self::prepare_tensor_io_lane`] or [`crate::StaticIoRuntime`].
+    pub fn prepare_io_binding_buffer_array<
+        's,
+        'v,
+        T: TensorElement,
+        const INPUTS: usize,
+        const OUTPUTS: usize,
+    >(
+        &'s self, inputs: [&'v dyn RunInput; INPUTS], outputs: [&'v TensorBuffer<T>; OUTPUTS],
+    ) -> Result<PreparedIoBinding<'s, 'v>> {
+        self.check_input_count(INPUTS)?;
+        self.check_output_count(OUTPUTS, "output count")?;
         let mut binding = IoBinding::new(self)?;
         for (i, input) in inputs.iter().enumerate() {
             binding.bind_input(self.input_name(i)?, *input)?;
@@ -1084,6 +1338,150 @@ impl Session {
         self.run_impl(inputs, outputs, opts.as_ptr())
     }
 
+    /// Fixed-capacity regular run for callers with compile-time I/O arity.
+    ///
+    /// This avoids the `Vec` fallback in [`Self::run`] even for models with more than the
+    /// internal small-stack threshold. It still returns ORT-owned outputs; use IoBinding or
+    /// lane APIs when caller-owned output buffers are required.
+    pub fn run_array<const INPUTS: usize, const OUTPUTS: usize>(
+        &self, inputs: [&dyn RunInput; INPUTS], outputs: &mut [Option<OwnedValue>; OUTPUTS],
+    ) -> Result<()> {
+        self.run_array_with(inputs, outputs, &self.run_opts)
+    }
+
+    /// Fixed-capacity regular run with caller-provided run options.
+    pub fn run_array_with<const INPUTS: usize, const OUTPUTS: usize>(
+        &self, inputs: [&dyn RunInput; INPUTS], outputs: &mut [Option<OwnedValue>; OUTPUTS],
+        opts: &RunOptions,
+    ) -> Result<()> {
+        self.check_input_count(INPUTS)?;
+        self.check_output_count(OUTPUTS, "output slot count")?;
+        let in_handles: [*const sys::ValueHandle; INPUTS] =
+            std::array::from_fn(|i| inputs[i].as_value_ptr());
+        let mut out_handles: [*mut sys::ValueHandle; OUTPUTS] =
+            std::array::from_fn(|_| ptr::null_mut());
+        self.run_raw(&in_handles, &mut out_handles, opts.as_ptr())?;
+        self.stamp_outputs(&out_handles, outputs)
+    }
+
+    /// Copy an engine-owned value into an existing reusable tensor buffer via ORT `CopyTensors`.
+    pub fn copy_value_to_tensor_buffer<T: TensorElement>(
+        &self, src: &OwnedValue, dst: &mut TensorBuffer<T>,
+    ) -> Result<()> {
+        self.copy_tensor_handles(
+            &[src.value as *const sys::ValueHandle],
+            &[dst.as_value_ptr()],
+        )
+    }
+
+    /// Copy an engine-owned value into an existing ORT-allocated tensor via ORT `CopyTensors`.
+    pub fn copy_value_to_allocated_tensor<T: TensorElement>(
+        &self, src: &OwnedValue, dst: &mut AllocatedTensor<T>,
+    ) -> Result<()> {
+        self.copy_tensor_handles(
+            &[src.value as *const sys::ValueHandle],
+            &[dst.as_value_ptr()],
+        )
+    }
+
+    /// Copy any ORT tensor input into an existing reusable tensor buffer via ORT `CopyTensors`.
+    pub fn copy_input_to_tensor_buffer<T: TensorElement>(
+        &self, src: &dyn RunInput, dst: &mut TensorBuffer<T>,
+    ) -> Result<()> {
+        self.copy_tensor_handles(&[src.as_value_ptr()], &[dst.as_value_ptr()])
+    }
+
+    /// Copy any ORT tensor input into an existing ORT-allocated tensor via ORT `CopyTensors`.
+    pub fn copy_input_to_allocated_tensor<T: TensorElement>(
+        &self, src: &dyn RunInput, dst: &mut AllocatedTensor<T>,
+    ) -> Result<()> {
+        self.copy_tensor_handles(&[src.as_value_ptr()], &[dst.as_value_ptr()])
+    }
+
+    fn copy_tensor_handles(
+        &self, src: &[*const sys::ValueHandle], dst: &[*const sys::ValueHandle],
+    ) -> Result<()> {
+        if src.len() != dst.len() {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: CopyTensors source/destination count mismatch: {} vs {}",
+                    src.len(),
+                    dst.len()
+                ),
+            ));
+        }
+        let mut dst_mut: Vec<*mut sys::ValueHandle> = dst
+            .iter()
+            .map(|&value| value as *mut sys::ValueHandle)
+            .collect();
+        let copy = check(unsafe {
+            api().copy_tensors()(
+                self._env.as_ptr(),
+                src.as_ptr(),
+                dst_mut.as_mut_ptr(),
+                ptr::null_mut(),
+                src.len(),
+            )
+        });
+        match copy {
+            Ok(()) => Ok(()),
+            Err(err) => match self.try_host_copy_tensor_handles(src, dst) {
+                Ok(true) => Ok(()),
+                Ok(false) => Err(err),
+                Err(fallback_err) => Err(fallback_err),
+            },
+        }
+    }
+
+    fn try_host_copy_tensor_handles(
+        &self, src: &[*const sys::ValueHandle], dst: &[*const sys::ValueHandle],
+    ) -> Result<bool> {
+        for (&src_value, &dst_value) in src.iter().zip(dst) {
+            let src_info = tensor_memory_info(src_value)?;
+            let dst_info = tensor_memory_info(dst_value)?;
+            if !src_info.is_host_accessible() || !dst_info.is_host_accessible() {
+                return Ok(false);
+            }
+
+            let mut src_bytes = 0usize;
+            check(unsafe { api().get_tensor_size_in_bytes()(src_value, &mut src_bytes) })?;
+            let mut dst_bytes = 0usize;
+            check(unsafe { api().get_tensor_size_in_bytes()(dst_value, &mut dst_bytes) })?;
+            if src_bytes != dst_bytes {
+                return Err(Error::new(
+                    -1,
+                    format!(
+                        "zrt: CopyTensors host fallback byte-size mismatch: source {src_bytes}, destination {dst_bytes}"
+                    ),
+                ));
+            }
+
+            let mut src_data: *const c_void = ptr::null();
+            check(unsafe {
+                api().get_tensor_data()(
+                    src_value,
+                    &mut src_data as *mut *const c_void as *const *const c_void,
+                )
+            })?;
+            let mut dst_data: *mut c_void = ptr::null_mut();
+            check(unsafe {
+                api().get_tensor_mutable_data()(dst_value as *mut sys::ValueHandle, &mut dst_data)
+            })?;
+            let src_data =
+                crate::slice_data_ptr(src_data as *mut u8, src_bytes, "CopyTensors source data")?;
+            let dst_data = crate::slice_data_ptr(
+                dst_data as *mut u8,
+                dst_bytes,
+                "CopyTensors destination data",
+            )?;
+            unsafe {
+                ptr::copy_nonoverlapping(src_data as *const u8, dst_data, src_bytes);
+            }
+        }
+        Ok(true)
+    }
+
     fn run_impl(
         &self, inputs: &[&dyn RunInput], outputs: &mut [Option<OwnedValue>],
         opts: *const sys::RunOptionsHandle,
@@ -1200,6 +1598,18 @@ impl Session {
         binding.synchronize_outputs()
     }
 
+    /// Run with an [`crate::IoBinding`] without calling ORT's bound-input/output synchronization
+    /// helpers before and after the run.
+    ///
+    /// This is useful for fully host-resident lanes, or for advanced callers that synchronize
+    /// device streams externally. Prefer [`Self::run_binding`] unless the binding's memory
+    /// placement and synchronization contract are known up front.
+    pub fn run_binding_unsynchronized(&self, binding: &crate::io_binding::IoBinding) -> Result<()> {
+        check(unsafe {
+            api().run_with_binding()(self.sess, self.run_opts.as_ptr(), binding.as_ptr())
+        })
+    }
+
     /// Run with an [`crate::IoBinding`] and a caller-provided [`RunOptions`] (per-call config
     /// or cancellation). See [`Self::run_with`] / [`Self::run_binding`].
     pub fn run_binding_with(
@@ -1208,6 +1618,15 @@ impl Session {
         binding.synchronize_inputs()?;
         check(unsafe { api().run_with_binding()(self.sess, opts.as_ptr(), binding.as_ptr()) })?;
         binding.synchronize_outputs()
+    }
+
+    /// Run with a caller-provided [`RunOptions`] without ORT bound-input/output synchronization.
+    ///
+    /// See [`Self::run_binding_unsynchronized`] for the synchronization contract.
+    pub fn run_binding_unsynchronized_with(
+        &self, binding: &crate::io_binding::IoBinding, opts: &RunOptions,
+    ) -> Result<()> {
+        check(unsafe { api().run_with_binding()(self.sess, opts.as_ptr(), binding.as_ptr()) })
     }
 
     /// Run the model asynchronously (`RunAsync`, IDX 260) on an ORT worker thread. Returns a
