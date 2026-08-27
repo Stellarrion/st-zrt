@@ -1,0 +1,45 @@
+# cargo-deny configuration - Stellarrion standard
+# Run: cargo deny check advisories sources licenses
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+# Add temporary advisory exceptions here:
+# ignore = ["RUSTSEC-2024-XXXX"]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    # unicode-ident 1.0.17+ is `(MIT OR Apache-2.0) AND Unicode-3.0`; it occurs in all three
+    # covered graphs (proc-macro2/syn everywhere, plus wasm-bindgen-shared in the benchmark
+    # graphs). Permissive, OSI-approved.
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+# Duplicate versions are expected while criterion 0.5/ort rc pins drift; reviewed weekly.
+multiple-versions = "warn"
+# No graph (workspace, bench, bench-c) may depend on a `*` version requirement.
+wildcards = "deny"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+[sources]
+# Every resolved crate in every covered graph must come from the crates.io registry.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []

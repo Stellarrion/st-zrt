@@ -1,0 +1,182 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**"]
+    tags: ["st-zrt-v*"]
+  pull_request:
+    branches: [main, "release/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  # ORT permits only one default LoggingManager per process.
+  RUST_TEST_THREADS: "1"
+
+jobs:
+  rust:
+    # Native link/runtime coverage in this job is Linux x86-64 ONLY: every download, link,
+    # and test below runs against the linux-x64 ORT archive on an ubuntu runner. The
+    # cross-target checks (aarch64-unknown-linux-gnu, x86_64-pc-windows-gnu) compile with
+    # the DOCS_RS native-link guard and DO NOT link or run native ORT — they are
+    # compile-only coverage. There is no automated macOS or Windows native coverage.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Toolchain selected via the `toolchain` input so this master pin stays Dependabot-updatable.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          targets: aarch64-unknown-linux-gnu, x86_64-pc-windows-gnu
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Format
+        run: cargo fmt --check
+
+      # The action runs cargo-deny in its own pinned container, so it cannot be reused as
+      # a host binary by later steps. One invocation per Cargo graph, selected with the
+      # action's manifest-path input.
+      - name: Dependency policy (workspace graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+      - name: Dependency policy (bench graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: bench/Cargo.toml
+
+      - name: Dependency policy (bench-c graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: bench-c/Cargo.toml
+
+      - name: Verify canonical lockfile sources
+        run: |
+          for lock in Cargo.lock bench/Cargo.lock bench-c/Cargo.lock; do
+            ! grep -q '^\[\[patch\.unused\]\]' "$lock"
+            bad="$(grep '^source = ' "$lock" | grep -Fvx 'source = "registry+https://github.com/rust-lang/crates.io-index"' || true)"
+            test -z "$bad"
+          done
+
+      - name: Package license inventories
+        run: |
+          files="$(cargo package -p st-zrt-sys --list --allow-dirty --locked)"
+          grep -Fxq LICENSE <<<"$files"
+          files="$(cargo package -p st-zrt --list --allow-dirty --locked)"
+          grep -Fxq LICENSE <<<"$files"
+
+      - name: Clippy (workspace, all features)
+        env:
+          DOCS_RS: "1"
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Test st-zrt (default features)
+        run: cargo test -p st-zrt --locked
+
+      - name: Test st-zrt-sys (ABI / generated-table loads)
+        run: cargo test -p st-zrt-sys --locked
+
+      - name: Test serde session options
+        run: cargo test -p st-zrt --features serde --locked session_options
+
+      - name: Test model-editor graph augmentation
+        run: cargo test -p st-zrt --features model-editor --locked apply_model_fragment_to_existing_output
+
+      - name: Check extension feature surface
+        run: cargo check -p st-zrt --features model-editor,serde,ep,custom-ops --locked
+
+      - name: Check independent feature combinations
+        env:
+          DOCS_RS: "1"
+          RUSTDOCFLAGS: -Dwarnings
+        run: |
+          cargo check -p st-zrt-sys --no-default-features --locked
+          cargo doc -p st-zrt-sys --no-deps --no-default-features --locked
+          for features in ep custom-ops model-editor cuda training ep,model-editor custom-ops,model-editor; do
+            cargo check -p st-zrt-sys --no-default-features --features "$features" --locked
+            cargo doc -p st-zrt-sys --no-deps --no-default-features --features "$features" --locked
+          done
+          cargo check -p st-zrt --no-default-features --locked
+          cargo test -p st-zrt --tests --no-default-features --locked
+          cargo doc -p st-zrt --no-deps --no-default-features --locked
+          cargo test -p st-zrt --doc --no-default-features --locked
+          for features in half serde ep custom-ops model-editor ep,serde custom-ops,model-editor half,serde,ep,custom-ops,model-editor; do
+            cargo check -p st-zrt --no-default-features --features "$features" --locked
+            cargo doc -p st-zrt --no-deps --no-default-features --features "$features" --locked
+            cargo test -p st-zrt --doc --no-default-features --features "$features" --locked
+          done
+
+      - name: Verify generated API 27 bindings
+        run: scripts/check-generated-bindings.sh
+
+      - name: Check all features (edition-2024 unsafe-hygiene regression gate)
+        env:
+          DOCS_RS: "1"
+        run: cargo check -p st-zrt --all-targets --all-features --locked
+
+      # Compile-only cross coverage: DOCS_RS skips the archive download/link entirely, so
+      # these prove the public surface compiles for the target triples but do NOT prove
+      # native linking or runtime loading on those platforms (see the job comment above).
+      - name: Cross-check public library targets
+        env:
+          DOCS_RS: "1"
+        run: |
+          cargo check -p st-zrt --lib --all-features --target aarch64-unknown-linux-gnu --locked
+          cargo check -p st-zrt --lib --all-features --target x86_64-pc-windows-gnu --locked
+
+      - name: Check CUDA benchmark workspace without native linking
+        env:
+          DOCS_RS: "1"
+        run: cargo check --manifest-path bench-c/Cargo.toml --all-targets --features cuda --locked
+
+      # Compile-only gate for the standalone A/B harness graph (incumbent `ort` crate).
+      # DOCS_RS makes ort-sys's build script skip the prebuilt ORT download/link, the same
+      # way the DOCS_RS guard keeps st-zrt-sys offline; nothing native runs in this step.
+      - name: Check A/B benchmark workspace without native linking
+        env:
+          DOCS_RS: "1"
+        run: cargo check --manifest-path bench/Cargo.toml --all-targets --locked
+
+      # Docs must build offline (the docs.rs path): DOCS_RS makes st-zrt-sys's build.rs skip the
+      # archive fetch/link, mirroring how docs.rs builds the published crate.
+      - name: Docs (all features, offline via DOCS_RS guard)
+        env:
+          DOCS_RS: "1"
+        run: cargo doc --workspace --all-features --no-deps --locked
+
+  msrv:
+    # Verify the declared rust-version (1.85) floor — catches stable-only/2024 idioms that would
+    # silently raise the MSRV.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Immutable snapshot of dtolnay/rust-toolchain's 1.85.1 branch (2026-08-22). This is a
+      # branch pin, not a release tag — Dependabot does not track it and it carries no version
+      # marker on purpose; review when bumping MSRV.
+      - name: Install Rust 1.85.1
+        uses: dtolnay/rust-toolchain@85c23e28f7ccc75a9a153d45d385d94a85464876
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Check MSRV (workspace, all targets and features)
+        env:
+          # Compile the complete Rust surface without downloading/linking native ORT/CUDA on CI.
+          DOCS_RS: "1"
+        run: cargo check --workspace --all-targets --all-features --locked

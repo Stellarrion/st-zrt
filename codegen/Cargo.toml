@@ -1,0 +1,10 @@
+[package]
+name = "st-zrt-sys-codegen"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Dev-time generator: preprocesses onnxruntime_c_api.h and emits the typed zrt FFI table for st-zrt-sys. NOT bindgen — our own parser, zrt names."
+
+# Pure std + gcc -E -P. No deps, no link to onnxruntime.
+[dependencies]
