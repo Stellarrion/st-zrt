@@ -515,7 +515,7 @@ mod tests {
 
     /// Exercise the EP-device + hardware-device introspection accessors (`EpDevice_Device`,
     /// `EpDevice_EpMetadata`/`EpOptions`, `EpDevice_MemoryInfo`, and the `HardwareDevice_*`
-    /// family). On a CPU-only host discovery is empty and we skip; on a CUDA host the
+    /// family). On a CPU-only host discovery is empty and we skip; on the RTX 4090 the CUDA
     /// device is discovered and every accessor is read against real data.
     #[test]
     fn ep_device_introspection_accessors() {

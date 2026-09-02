@@ -174,9 +174,6 @@ pub(crate) struct SessionInner {
     /// Owned CUDA streams referenced by this session's provider configuration. Native session
     /// release occurs before these guards drop.
     _cuda_streams: CudaStreamGuards,
-    /// Spooled model file backing an external-data buffer load (see
-    /// [`Session::from_bytes_with_external_data`]). Dropped only after the native session is
-    /// released, since ORT may map or reopen external initializer data lazily.
     _spooled_model: Option<crate::model_spool::SpooledModelFile>,
     /// Keeps the Env alive for this Session's whole lifetime. The explicit `SessionInner::drop`
     /// releases the native session before Rust drops this guard.
@@ -370,21 +367,12 @@ fn ep_device_snapshot_from_ptr(
 impl Session {
     /// Load `model_path` (filesystem path, UTF-8) and pre-marshal its I/O names and
     /// output type/shape (cached so the hot path needs no introspection).
+    /// Load a model from a file path.
     pub fn new(env: &Environment, model_path: &str, opts: SessionOptions) -> Result<Self> {
         Self::new_with_spool(env, model_path, opts, None)
     }
 
-    /// Load a model from an in-memory byte buffer whose initializers use ONNX
-    /// **external data** (any model over the 2 GiB protobuf limit, and any model saved
-    /// with `save_as_external_data`).
-    ///
-    /// ORT resolves external-data paths relative to the model *file's* directory, which a
-    /// plain buffer load cannot supply (the reference stays unresolved and loading
-    /// fails). This constructor resolves it generically: `model_data` is spooled to a
-    /// unique temporary file inside `external_data_dir` — the directory that actually
-    /// holds the external-data files — and loaded through the path-based entry point.
-    /// The temporary file is removed when the session is dropped; the directory must be
-    /// writable. [`Self::from_bytes`] remains the right choice for self-contained models.
+    /// External-data-aware byte load (see [`Self::from_bytes_with_external_data`]).
     pub fn from_bytes_with_external_data(
         env: &Environment, model_data: &[u8], external_data_dir: impl AsRef<std::path::Path>,
         opts: SessionOptions,
@@ -394,8 +382,6 @@ impl Session {
         Self::new_with_spool(env, &spool_path, opts, Some(spool))
     }
 
-    /// Path-based creation that may carry the spooled model file keeping external data
-    /// resolvable; `Session::new` is this with `None`.
     fn new_with_spool(
         env: &Environment, model_path: &str, opts: SessionOptions,
         spool: Option<crate::model_spool::SpooledModelFile>,
@@ -2789,7 +2775,14 @@ impl Session {
         });
         unsafe { api().release_session_options()(opts_handle) };
         create?;
-        Self::from_handle(sess, env.share(), cuda_stream_guards(&opts))
+        Self::from_handle_with_resources(
+            sess,
+            env.share(),
+            Vec::new(),
+            None,
+            cuda_stream_guards(&opts),
+            None,
+        )
     }
 
     /// The opset `since_version` registered for `domain` on this session
@@ -2840,7 +2833,14 @@ impl Session {
         });
         unsafe { api().release_session_options()(opts_handle) };
         create?;
-        Self::from_handle(sess, env.share(), cuda_stream_guards(&opts))
+        Self::from_handle_with_resources(
+            sess,
+            env.share(),
+            Vec::new(),
+            None,
+            cuda_stream_guards(&opts),
+            None,
+        )
     }
 
     /// Apply a constructed [`crate::Model`] (e.g. extra nodes) to this model-editor session

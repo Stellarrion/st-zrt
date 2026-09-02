@@ -24,7 +24,6 @@ opaque_handle!(EpDeviceHandle);
 opaque_handle!(EpFactoryHandle);
 opaque_handle!(EpGraphSupportInfoHandle);
 opaque_handle!(EpHandle);
-opaque_handle!(ExperimentalFnPtrHandle);
 opaque_handle!(ExternalInitializerInfoHandle);
 opaque_handle!(ExternalMemoryDescriptorHandle);
 opaque_handle!(ExternalMemoryHandleHandle);
@@ -4710,33 +4709,6 @@ impl Api {
     }
 }
 
-// OrtExperimentalFnPtr(* GetExperimentalFunction)( const char* name)
-pub const IDX_GET_EXPERIMENTAL_FUNCTION: usize = 422;
-pub type GetExperimentalFunctionFn =
-    unsafe extern "C" fn(name: *const core::ffi::c_char) -> ExperimentalFnPtrHandle;
-impl Api {
-    #[inline]
-    pub unsafe fn get_experimental_function(&self) -> GetExperimentalFunctionFn {
-        unsafe { self.f(IDX_GET_EXPERIMENTAL_FUNCTION) }
-    }
-}
-
-// OrtStatusPtr(* SessionOptionsSetWeightlessSourceModelBuffer)( OrtSessionOptions* options, const void* source_model_data, size_t source_model_data_length) __attribute__((warn_unused_result))
-pub const IDX_SESSION_OPTIONS_SET_WEIGHTLESS_SOURCE_MODEL_BUFFER: usize = 424;
-pub type SessionOptionsSetWeightlessSourceModelBufferFn = unsafe extern "C" fn(
-    options: *mut SessionOptionsHandle,
-    source_model_data: *const core::ffi::c_void,
-    source_model_data_length: usize,
-) -> StatusPtr;
-impl Api {
-    #[inline]
-    pub unsafe fn session_options_set_weightless_source_model_buffer(
-        &self,
-    ) -> SessionOptionsSetWeightlessSourceModelBufferFn {
-        unsafe { self.f(IDX_SESSION_OPTIONS_SET_WEIGHTLESS_SOURCE_MODEL_BUFFER) }
-    }
-}
-
 // ── Custom-op kernel authoring ────────────────────────────────────────────────────────────────
 // OrtStatusPtr(* CustomOpDomain_Add)( OrtCustomOpDomain* custom_op_domain, const OrtCustomOp* op) __attribute__((warn_unused_result))
 #[cfg(feature = "custom-ops")]
@@ -5375,23 +5347,6 @@ impl Api {
         &self,
     ) -> KernelInfoGetAttributeArray_stringFn {
         unsafe { self.f(IDX_KERNEL_INFO_GET_ATTRIBUTE_ARRAY_STRING) }
-    }
-}
-
-// OrtStatusPtr(* KernelContext_GetSyncStream)( const OrtKernelContext* context, OrtSyncStream** out) __attribute__((warn_unused_result))
-#[cfg(feature = "custom-ops")]
-pub const IDX_KERNEL_CONTEXT__GET_SYNC_STREAM: usize = 423;
-#[cfg(feature = "custom-ops")]
-pub type KernelContext_GetSyncStreamFn = unsafe extern "C" fn(
-    context: *const KernelContextHandle,
-    out_: *mut *mut SyncStreamHandle,
-) -> StatusPtr;
-#[cfg(feature = "custom-ops")]
-impl Api {
-    #[inline]
-    #[cfg(feature = "custom-ops")]
-    pub unsafe fn kernel_context__get_sync_stream(&self) -> KernelContext_GetSyncStreamFn {
-        unsafe { self.f(IDX_KERNEL_CONTEXT__GET_SYNC_STREAM) }
     }
 }
 
@@ -6327,12 +6282,6 @@ pub struct CompileApi {
             model: *const ModelHandle,
         ) -> StatusPtr,
     >,
-    pub ModelCompilationOptions_SetWeightlessEnabled: Option<
-        unsafe extern "C" fn(
-            model_compile_options: *mut ModelCompilationOptionsHandle,
-            use_weightless: bool,
-        ) -> StatusPtr,
-    >,
 }
 #[cfg(feature = "model-editor")]
 #[repr(C)]
@@ -6785,13 +6734,6 @@ pub struct EpApi {
             events_container: *mut ProfilingEventsContainerHandle,
             events: *const *const ProfilingEventHandle,
             num_events: usize,
-        ) -> StatusPtr,
-    >,
-    pub SessionOptionsGetWeightlessSourceModelBuffer: Option<
-        unsafe extern "C" fn(
-            session_options: *const SessionOptionsHandle,
-            source_model_data: *const *const core::ffi::c_void,
-            source_model_data_length: *mut usize,
         ) -> StatusPtr,
     >,
 }

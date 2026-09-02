@@ -10,6 +10,6 @@ use ort::value::Tensor;
 #[inline]
 pub fn copy_tensor_f32(n_floats: usize) -> ort::Result<Tensor<f32>> {
     // Non-zero fill: forces real, resident pages so the copy is measured honestly
-    // (an all-zero source hits OS zero-page shortcuts at large sizes).
+    // (an all-zero source hits OS zero-page shortcuts at large sizes — see RESULTS.md anomaly).
     Tensor::<f32>::from_array((vec![n_floats as i64], vec![1.0; n_floats]))
 }

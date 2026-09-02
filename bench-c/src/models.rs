@@ -21,20 +21,6 @@ fn bench_models_dir() -> PathBuf {
         .join("models")
 }
 
-/// Path of the locally generated single-Identity model (input/output `[1, 65536]`
-/// f32) used as a kernel-free wrapper-overhead probe. Not downloaded: it must be
-/// generated locally with `bench/tools/gen_models.py`.
-pub fn identity_path() -> std::io::Result<PathBuf> {
-    let path = bench_models_dir().join("identity_256k.onnx");
-    if path.exists() {
-        Ok(path)
-    } else {
-        Err(std::io::Error::other(
-            "identity_256k.onnx missing from bench/models (generate it locally)",
-        ))
-    }
-}
-
 /// Resolve mnist.onnx: prefer the sibling `bench/models/` cache, else download locally.
 pub fn ensure_mnist() -> std::io::Result<PathBuf> {
     let sibling = bench_models_dir().join("mnist.onnx");

@@ -286,29 +286,6 @@ impl std::fmt::Debug for Environment {
 /// the cause. Checked at the top of every `Environment` constructor — one
 /// `GetVersionString` C call, never on a session hot path. Supported lines:
 /// [`sys::SUPPORTED_RUNTIME_LINES`].
-/// Apply library defaults to the process environment before the first ORT interaction.
-///
-/// Telemetry: the GPU `libonnxruntime` package ships with POSIX telemetry compiled in.
-/// `st-zrt` sets `ORT_DISABLE_TELEMETRY=1` before initialization **unless the variable is
-/// already present** — an explicitly exported value always wins, so users who want
-/// telemetry can export `ORT_DISABLE_TELEMETRY=0` (or any other value) and keep it.
-fn apply_env_creation_defaults() {
-    if std::env::var_os("ORT_DISABLE_TELEMETRY").is_none() {
-        // SAFETY: process-environment mutation. The value is a static literal (no
-        // allocation), every concurrent writer would write the identical bytes, and the
-        // write happens strictly before the first ORT environment is created in this
-        // call's caller — the point ORT reads the variable.
-        unsafe { std::env::set_var("ORT_DISABLE_TELEMETRY", "1") };
-    }
-}
-
-/// Shared pre-`CreateEnv` checks: environment defaults (telemetry opt-out) followed by
-/// the supported-runtime-line guard.
-fn env_creation_checks() -> Result<()> {
-    apply_env_creation_defaults();
-    verify_runtime_version()
-}
-
 fn verify_runtime_version() -> Result<()> {
     if let Some(found) = sys::runtime_version_string() {
         if !sys::runtime_version_supported(&found) {
@@ -335,7 +312,7 @@ impl Environment {
 
     /// Create with a custom log level and log id.
     pub fn new_with_level(level: sys::LoggingLevel, logid: &str) -> Result<Self> {
-        env_creation_checks()?;
+        verify_runtime_version()?;
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
         let mut env: *mut sys::EnvHandle = ptr::null_mut();
@@ -357,7 +334,7 @@ impl Environment {
     pub fn new_with_global_thread_pools(
         level: sys::LoggingLevel, logid: &str, threading: crate::threading::ThreadingOptions,
     ) -> Result<Self> {
-        env_creation_checks()?;
+        verify_runtime_version()?;
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
         let mut env: *mut sys::EnvHandle = ptr::null_mut();
@@ -391,7 +368,7 @@ impl Environment {
     where
         L: Fn(LogRecord) + Send + Sync + 'static,
     {
-        env_creation_checks()?;
+        verify_runtime_version()?;
         let ul = UserLogger::new(logger);
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
@@ -422,7 +399,7 @@ impl Environment {
     where
         L: Fn(LogRecord) + Send + Sync + 'static,
     {
-        env_creation_checks()?;
+        verify_runtime_version()?;
         let ul = UserLogger::new(logger);
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
@@ -756,7 +733,7 @@ impl EnvCreationOptions {
     /// Materialize the Env (`CreateEnvWithOptions`). Consumes the builder; the logger (if any) is
     /// moved into the Env so it stays alive for the Env's lifetime.
     pub fn create_env(self) -> Result<Environment> {
-        env_creation_checks()?;
+        verify_runtime_version()?;
         let cid = CString::new(self.logid.as_str())
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
         let (log_fn, log_param) = match &self.logger {
