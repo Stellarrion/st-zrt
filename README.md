@@ -5,10 +5,10 @@
 [![docs.rs](https://docs.rs/st-zrt/badge.svg)](https://docs.rs/st-zrt)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
 
-`st-zrt` is a safe Rust runtime layer over ONNX Runtime 1.29: it removes the repeated
-Rust-side setup, marshaling, and copies that a plain wrapper pays on every prepared
-inference call. It is not a model server or scheduler, and it does not replace ONNX
-Runtime kernels, graph optimization, or execution providers.
+`st-zrt` is a safe Rust runtime layer over ONNX Runtime 1.29 that turns prepared
+inference into a zero-ceremony hot path: bind tensors once, then run — no per-call
+setup, marshaling, allocation, or copying. It keeps ONNX Runtime's kernels, graph
+optimization, and execution providers, and leaves scheduling to you.
 
 ## Status
 
