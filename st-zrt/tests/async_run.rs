@@ -19,15 +19,9 @@ fn mnist_path() -> std::path::PathBuf {
 /// spin so the ORT worker thread (which fires `RunAsync`'s callback + wakes) can make
 /// progress. The waker is a no-op — we rely on the yield-spin to observe completion.
 fn block_on<F: std::future::Future>(mut fut: F) -> F::Output {
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake};
+    use std::task::{Context, Poll};
 
-    struct NoopWake;
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-    let waker = Arc::new(NoopWake).into();
-    let mut cx = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(std::task::Waker::noop());
     // SAFETY: `fut` stays pinned on this stack frame for the whole poll loop.
     let mut pinned = unsafe { std::pin::Pin::new_unchecked(&mut fut) };
     loop {

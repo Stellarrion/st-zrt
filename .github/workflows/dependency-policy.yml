@@ -1,8 +1,7 @@
 name: Dependency policy
 
 # Weekly dependency-policy/advisory sweep for every covered Cargo graph. This workflow
-# never tags, releases, or publishes anything; tag-bound release gates stay manual
-# (see docs/v0.3-release-checklist.md).
+# never tags, releases, or publishes anything; tag-bound release gates stay manual.
 
 on:
   schedule:
