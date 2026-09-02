@@ -55,10 +55,15 @@ fn main() {
         }
     }
 
-    let pp = match preprocessed {
+    let mut pp = match preprocessed {
         Some(p) => std::fs::read_to_string(&p).expect("read preprocessed"),
         None => preprocess(&header),
     };
+    // Pre-C23 toolchains expand stdbool's `bool` macro to `_Bool` in the preprocessed
+    // output while C23 toolchains keep the `bool` keyword. Normalize to `bool` so the
+    // parsed signatures, the emitted doc comments, and the type mapping are identical
+    // regardless of the compiler that produced the text.
+    pp = pp.replace("_Bool", "bool");
     let fields = parse_api_struct(&pp, "OrtApi");
     if fields.is_empty() {
         panic!("codegen: no OrtApi fields parsed — header layout changed?");
@@ -437,6 +442,8 @@ fn map_base(b: &str) -> String {
         "float" => "f32".into(),
         "double" => "f64".into(),
         "bool" => "bool".into(),
+        // Belt and braces: normalized above, but map it directly if it ever slips through.
+        "_Bool" => "bool".into(),
         // ORT status: the typedef (no star) maps to StatusPtr; the bare type (with a
         // star, e.g. OrtStatus*) maps to the handle so the pointer level is added once.
         "OrtStatusPtr" => "StatusPtr".into(),
