@@ -15,9 +15,14 @@ _types.toml
 _typos.toml
 bench/RESULTS.md
 
+# Deep-dive docs are local-only (architecture, benchmark results, release checklists).
+/docs/
+
 # Local tooling / session artifacts. Agent and progress notes are never project source.
 .serena/
 .duet/
 AGENTS.md
+/AGENT.md
 progress.md
 progress-*.md
+/docs/
