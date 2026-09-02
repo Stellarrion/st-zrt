@@ -129,6 +129,29 @@ binding freshness with `ServingLane::set_rebind_inputs_each_run(true)` or
 composable `BufferSpec` values (`AUTO`, `LATENCY`, `THROUGHPUT_LARGE`, `PINNED_HOST`,
 `CUDA_PINNED`, or `BufferSpec::aligned(4096).prefault()`).
 
+## Benchmarks (local characterization)
+
+Medians from the in-tree A/B harnesses (`bench/` = incumbent `ort` crate, `bench-c/` =
+`st-zrt`), Criterion with 10 samples, Linux x86_64, single-threaded where noted; each
+crate uses its own pinned ONNX Runtime. Reproduce with
+`cargo bench --manifest-path bench-c/Cargo.toml --bench inference` (and the `bench/`
+counterparts). These are local characterizations, not cross-machine guarantees.
+
+| Workload | `ort` naive | `ort` expert (IoBinding) | `st-zrt` prepared lane |
+|---|---:|---:|---:|
+| MNIST 1×1×28×28, 1 thread | 20.1 µs | 19.6 µs | **18.5 µs** |
+| Relay model, 4 MiB input | 164.9 µs | — | **100.3 µs** |
+| ResNet-50, batch 1 | 50.88 ms | 50.61 ms | 50.30 ms |
+
+Reading the table honestly: on a tiny model the win is small once a single thread is
+pinned (thread-pool scheduling, not the wrapper, dominates tiny-model latency — prepare
+once and pin threads). The 4 MiB relay row shows the copy-elimination win st-zrt is
+built for (−39%). On a real kernel-bound model like ResNet-50 all paths converge to the
+same ORT kernels (~1% apart) — the wrapper's job is to not add overhead, and neither
+crate does at that scale. On a 16 MiB relay variant the expert `ort` IoBinding path can
+edge ahead (~15%): once kernels and memory traffic dominate, wrapper choice stops being
+the bottleneck — pick the API shape you need.
+
 ## CUDA (advanced, optional)
 
 The `cuda` feature links the GPU ONNX Runtime package (CUDA 13) plus a system CUDA 13
