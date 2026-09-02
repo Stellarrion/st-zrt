@@ -330,6 +330,13 @@ fn main() {
     // rerun-if-env-changed directive exists, Cargo only reruns for the listed variables,
     // so listing DOCS_RS only when it is already set would freeze the docs.rs path on.
     println!("cargo:rerun-if-env-changed=DOCS_RS");
+
+    // The pinned ORT version must be visible to the crate (re-exported as `ORT_VERSION`)
+    // even on the DOCS_RS early-return path below, where no artifact is acquired: the pin
+    // is a compile-time constant of the binding surface, not of the acquisition step.
+    // Emitted from the same constant that drives the download/sha256 table.
+    println!("cargo:rustc-env=ST_ZRT_ORT_VERSION={ORT_VERSION}");
+
     if env::var_os("DOCS_RS").is_some() {
         return;
     }

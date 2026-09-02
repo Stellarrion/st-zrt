@@ -39,7 +39,7 @@ unsafe FFI boundary, build-script download/extraction logic, and CI definitions.
 - Linux x86_64 is the only platform with native link and test coverage (CI). Linux
   aarch64 and Windows x64 are compile-only in CI; macOS arm64 builds download the ORT
   archive but have no automated coverage; macOS x86_64 is not supported by the ONNX
-  Runtime 1.27.0 archive set. See the README "Platform Support" table.
+  Runtime 1.27.0 archive set. See the platform support table in SUPPORT.md.
 - Reports against other platforms are accepted as compile-only findings.
 
 Fixes are released through the repository's approval-gated release process

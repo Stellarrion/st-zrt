@@ -4,7 +4,7 @@
 //! [`crate::Session`] takes its own `Arc` clone at construction, which **keeps the Env
 //! alive for the Session's whole lifetime**. This matters because ORT sessions reference
 //! the Env's thread pools/allocator — releasing the Env while a Session still lives is a
-//! use-after-free (the root cause of the historical ">4MB segfault"; see RESULTS.md §8).
+//! use-after-free (the root cause of the historical ">4MB segfault").
 //! Because the Session owns an `Arc` ref, that UAF can no longer occur regardless of how a
 //! caller scopes its `Environment`.
 use crate::{Error, Result, api, check, sys};
@@ -279,6 +279,31 @@ impl std::fmt::Debug for Environment {
     }
 }
 
+/// Fail loudly when the loaded libonnxruntime is not a supported release line.
+///
+/// `GetApi(API_VERSION)` succeeds against any newer runtime (the ORT C API is append-only),
+/// so a too-new or wrong-major library can otherwise load and then misbehave far away from
+/// the cause. Checked at the top of every `Environment` constructor — one
+/// `GetVersionString` C call, never on a session hot path. Supported lines:
+/// [`sys::SUPPORTED_RUNTIME_LINES`].
+fn verify_runtime_version() -> Result<()> {
+    if let Some(found) = sys::runtime_version_string() {
+        if !sys::runtime_version_supported(&found) {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "loaded libonnxruntime {found} is not supported by st-zrt (supported \
+                     release lines: {:?}; this build bundles ONNX Runtime {}). Point the \
+                     dynamic loader at a supported libonnxruntime, or upgrade st-zrt.",
+                    sys::SUPPORTED_RUNTIME_LINES,
+                    sys::ORT_VERSION
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Environment {
     /// Create with `Warning` log level and the log id `"zrt"`.
     pub fn new() -> Result<Self> {
@@ -287,6 +312,7 @@ impl Environment {
 
     /// Create with a custom log level and log id.
     pub fn new_with_level(level: sys::LoggingLevel, logid: &str) -> Result<Self> {
+        verify_runtime_version()?;
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
         let mut env: *mut sys::EnvHandle = ptr::null_mut();
@@ -308,6 +334,7 @@ impl Environment {
     pub fn new_with_global_thread_pools(
         level: sys::LoggingLevel, logid: &str, threading: crate::threading::ThreadingOptions,
     ) -> Result<Self> {
+        verify_runtime_version()?;
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
         let mut env: *mut sys::EnvHandle = ptr::null_mut();
@@ -341,6 +368,7 @@ impl Environment {
     where
         L: Fn(LogRecord) + Send + Sync + 'static,
     {
+        verify_runtime_version()?;
         let ul = UserLogger::new(logger);
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
@@ -371,6 +399,7 @@ impl Environment {
     where
         L: Fn(LogRecord) + Send + Sync + 'static,
     {
+        verify_runtime_version()?;
         let ul = UserLogger::new(logger);
         let cid = CString::new(logid)
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
@@ -704,6 +733,7 @@ impl EnvCreationOptions {
     /// Materialize the Env (`CreateEnvWithOptions`). Consumes the builder; the logger (if any) is
     /// moved into the Env so it stays alive for the Env's lifetime.
     pub fn create_env(self) -> Result<Environment> {
+        verify_runtime_version()?;
         let cid = CString::new(self.logid.as_str())
             .map_err(|_| Error::new(-1, "environment log id contains a NUL byte"))?;
         let (log_fn, log_param) = match &self.logger {

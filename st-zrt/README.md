@@ -7,7 +7,9 @@ without per-request setup, marshaling, or reallocation on the hot path.
 
 ## Status
 
-`st-zrt` 0.3 targets ONNX Runtime 1.27 (API 27). Linux x86_64 is the reference
+`st-zrt` 0.3 targets ONNX Runtime 1.27 (API 27) and additionally supports 1.28.x
+runtimes supplied via `ST_ZRT_ORT_PATH` (the ORT C API is append-only, so the API-27
+table stays valid); `Environment` creation rejects any other runtime line. Linux x86_64 is the reference
 platform; MSRV is Rust 1.85 (edition 2024). See the repository
 [CHANGELOG](https://github.com/Stellarrion/st-zrt/blob/main/CHANGELOG.md) for release details.
 
@@ -101,10 +103,10 @@ configured with composable `BufferSpec` policies (`AUTO`, `LATENCY`,
 ## Documentation
 
 - [API docs (docs.rs)](https://docs.rs/st-zrt)
-- [Architecture](https://github.com/Stellarrion/st-zrt/blob/main/docs/architecture.md)
-- [CUDA graph paths](https://github.com/Stellarrion/st-zrt/blob/main/docs/cuda-graph-paths.md)
-- [Benchmark results](https://github.com/Stellarrion/st-zrt/blob/main/docs/v0.3-benchmark-results.md)
 - [CHANGELOG](https://github.com/Stellarrion/st-zrt/blob/main/CHANGELOG.md)
+
+Architecture notes, CUDA-graph design, and benchmark results are maintained locally in
+the source checkout and are not published.
 
 The raw generated FFI lives in the
 [`st-zrt-sys`](https://github.com/Stellarrion/st-zrt/blob/main/st-zrt-sys/README.md)

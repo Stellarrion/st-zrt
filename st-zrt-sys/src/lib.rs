@@ -20,6 +20,49 @@ use std::os::raw::c_int;
 /// libonnxruntime API version we bind (1.27.0 → API version 27).
 pub const API_VERSION: u32 = 27;
 
+/// The exact libonnxruntime version this crate acquires and links by default.
+///
+/// Injected by `build.rs` from the same constant that drives the download/sha256 table, so
+/// the artifact, the pin, and this public constant cannot drift apart.
+pub const ORT_VERSION: &str = env!("ST_ZRT_ORT_VERSION");
+
+/// libonnxruntime release lines whose runtime these API-{API_VERSION} bindings support.
+///
+/// The default acquisition is [`ORT_VERSION`] (`1.27`). A `1.28` runtime is also supported:
+/// the ORT C API is append-only (API 27 → 28 adds `KernelContext_GetSyncStream` and removes
+/// nothing), so the API-27 table obtained via `GetApi(27)` is valid against 1.28.x. Bind a
+/// different runtime by pointing `ST_ZRT_ORT_PATH` at an extracted onnxruntime directory
+/// (see the build-script docs). The safe wrapper rejects any other line at
+/// `Environment` creation; [`runtime_version_supported`] is the predicate.
+pub const SUPPORTED_RUNTIME_LINES: &[&str] = &["1.27", "1.28"];
+
+/// `GetVersionString()` of the loaded libonnxruntime, if the entry point is callable.
+///
+/// Returns the runtime's own version string (e.g. `"1.28.1"`), not the pinned
+/// [`ORT_VERSION`]: it reports what the dynamic loader actually resolved.
+#[inline]
+pub fn runtime_version_string() -> Option<String> {
+    let base = api_base();
+    if base.is_null() {
+        return None;
+    }
+    unsafe { (*base).version_string() }.map(|s| s.to_string_lossy().into_owned())
+}
+
+/// Whether a `GetVersionString()` result belongs to a [`SUPPORTED_RUNTIME_LINES`] line.
+///
+/// Matches on `major.minor` only, so any patch (and pre-release suffix) of a supported
+/// line passes and anything else — older lines, newer lines, a different major — fails.
+pub fn runtime_version_supported(version: &str) -> bool {
+    let mut fields = version.split('.');
+    match (fields.next(), fields.next()) {
+        (Some(major), Some(minor)) => SUPPORTED_RUNTIME_LINES
+            .iter()
+            .any(|line| line.split('.').take(2).eq([major, minor])),
+        _ => false,
+    }
+}
+
 // ─── opaque-handle macro (the generated table invokes this) ──────────────────
 macro_rules! opaque_handle {
     ($name:ident) => {
@@ -514,10 +557,28 @@ mod tests {
         assert!(!base.is_null(), "api_base() null");
         let api = api();
         assert!(!api.is_null(), "api() null — GetApi({API_VERSION}) failed");
-        if let Some(vs) = unsafe { (*base).version_string() } {
-            let s = vs.to_string_lossy();
+        if let Some(s) = runtime_version_string() {
             eprintln!("onnxruntime: {s}");
-            assert!(s.contains("1.27"), "unexpected ort version: {s}");
+            assert!(
+                runtime_version_supported(&s),
+                "loaded libonnxruntime {s:?} is not a supported line                  {SUPPORTED_RUNTIME_LINES:?} for st-zrt-sys {ORT_VERSION}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_version_matching() {
+        for accepted in ["1.27.0", "1.27.999", "1.28.0", "1.28.1", "1.28.0-rc2"] {
+            assert!(
+                runtime_version_supported(accepted),
+                "should accept {accepted:?}"
+            );
+        }
+        for rejected in ["1.26.0", "1.99.0", "2.0.0", "1.2", "1", "", "onnxruntime"] {
+            assert!(
+                !runtime_version_supported(rejected),
+                "should reject {rejected:?}"
+            );
         }
     }
 

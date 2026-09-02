@@ -40,8 +40,8 @@
 pub use st_zrt_sys as sys;
 pub use sys::{
     AllocatorType, ElementType, ExecutionMode, ExecutionProviderDevicePolicy,
-    GraphOptimizationLevel, LoggingLevel, MemType, OrtErrorCode, ProfilingEventCategory,
-    SparseFormat, SparseIndicesFormat,
+    GraphOptimizationLevel, LoggingLevel, MemType, ORT_VERSION, OrtErrorCode,
+    ProfilingEventCategory, SUPPORTED_RUNTIME_LINES, SparseFormat, SparseIndicesFormat,
 };
 
 mod allocator;

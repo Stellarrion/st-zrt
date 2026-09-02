@@ -13,10 +13,13 @@ Runtime kernels, graph optimization, or execution providers.
 ## Status
 
 - Latest **published** wrapper: `st-zrt` **0.2.1** (crates.io).
-- This checkout is the **unpublished 0.3.0 release candidate**; the changelog and
-  [`docs/v0.3-release-checklist.md`](docs/v0.3-release-checklist.md) describe it.
+- This checkout is the **unpublished 0.3.0 release candidate**; the changelog and the
+  local `docs/v0.3-release-checklist.md` describe it.
 - `st-zrt-sys` candidate: **1.27.1** (binding revision over the unchanged ONNX Runtime
   1.27.0 / API 27 ABI).
+- Supported ONNX Runtime lines for this release: **1.27** (bundled by `st-zrt-sys`) and
+  **1.28** (bring-your-own runtime via `ST_ZRT_ORT_PATH`; the append-only C API keeps the
+  API-27 table valid there). `Environment` rejects every other line at creation.
 - Linux x86_64 is the reference platform (the only one with automated native link and
   test coverage). MSRV: Rust 1.85, edition 2024.
 - Support levels per platform: [`SUPPORT.md`](SUPPORT.md).
@@ -175,8 +178,9 @@ CUDA-graph lease semantics and path-selection limits are documented in
 - `st-zrt` — safe runtime API ([crate README](st-zrt/README.md)).
 - `st-zrt-sys` — generated raw FFI and ORT acquisition/linking.
 - `st-zrt-sys-codegen` — dev-time generator for the checked-in FFI table.
-- `bench/`, `bench-c/` — standalone A/B/C benchmark crates (kept out of the workspace
-  because `ort-sys` and `st-zrt-sys` both link `onnxruntime`).
+- `bench/`, `bench-c/`, `bench-cpp/` — standalone A/B/C benchmark crates and the C++
+  expert baseline (kept out of the workspace because `ort-sys` and `st-zrt-sys` both link
+  `onnxruntime`).
 
 Docs: [`architecture`](docs/architecture.md) ·
 [CUDA graphs](docs/cuda-graph-paths.md) ·

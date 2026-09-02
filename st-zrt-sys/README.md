@@ -6,6 +6,9 @@ This crate exposes the `OrtApi` function-pointer table, stable ORT enums, opaque
 build logic used by `st-zrt`. The major/minor version mirrors `libonnxruntime`: `st-zrt-sys 1.27.1` is the first Rust-binding
 revision targeting ONNX Runtime 1.27.0 after the already-published `st-zrt-sys 1.27.0`. The patch
 component revisions the binding surface; the native ABI/API target remains ONNX Runtime 1.27.0/API 27.
+A 1.28.x runtime is also supported: the C API is append-only (API 27 → 28 adds
+`KernelContext_GetSyncStream`, removes nothing), so binding `ST_ZRT_ORT_PATH` to an
+extracted 1.28 runtime is valid; `st_zrt_sys::SUPPORTED_RUNTIME_LINES` is the machine-readable policy.
 
 What is different:
 
