@@ -70,6 +70,7 @@ mod memory;
 mod metadata;
 #[cfg(feature = "model-editor")]
 mod model_editor;
+pub(crate) mod model_spool;
 mod prepacked;
 mod run_options;
 mod runtime;

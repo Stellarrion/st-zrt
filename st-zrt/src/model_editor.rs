@@ -594,6 +594,23 @@ impl ModelCompilationOptions {
         check(unsafe { set_input(self.ptr, model.as_ptr()) })
     }
 
+    /// Input: the bytes of a serialized ONNX model whose initializers use **external
+    /// data** (BORROWED for the duration of compile).
+    ///
+    /// ORT cannot resolve external-data references without a model-file base directory;
+    /// this variant spools `bytes` to a unique temporary file inside
+    /// `external_data_dir` — the directory holding the external-data files — and sets
+    /// the input model by path. The returned guard owns the temporary file: keep it
+    /// alive until `compile` has returned, then drop it (the file is removed on drop).
+    pub fn set_input_model_from_buffer_with_external_data(
+        &self, bytes: &[u8], external_data_dir: impl AsRef<std::path::Path>,
+    ) -> Result<crate::model_spool::SpooledModelFile> {
+        let spool = crate::model_spool::spool_model_bytes(external_data_dir.as_ref(), bytes)?;
+        let path = spool.path().to_string_lossy().into_owned();
+        self.set_input_model_path(&path)?;
+        Ok(spool)
+    }
+
     /// Input: the bytes of a serialized ONNX model (BORROWED for the duration of compile).
     pub fn set_input_model_from_buffer(&self, bytes: &[u8]) -> Result<()> {
         let set_input = require_sub_api_fn(
