@@ -1,9 +1,9 @@
-//! ortx benchmark harness (M0 — the feasibility gate).
+//! st-zrt A/B benchmark harness (M0 — the feasibility gate).
 //!
-//! See ../BENCHMARK.md. Three variants share one libonnxruntime:
+//! Three variants share one libonnxruntime:
 //!  - A: ort default (copying path)
 //!  - B: ort expert  (IoBinding + prealloc + RunOptions reuse)
-//!  - C: ortx proto  (pre-marshal + genuine zero-copy)  [task #6]
+//!  - C: st-zrt proto (pre-marshal + genuine zero-copy)
 #![allow(dead_code)]
 
 pub mod micro;
