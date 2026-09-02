@@ -1,3 +1,10 @@
+## [0.3.2] — 2026-09-03
+
+Correct release of the external-data byte-loading backport for the 0.3 line
+(ONNX Runtime 1.27 bundled, 1.28 bring-your-own). 0.3.1 was briefly published with a
+wrong dependency pin (1.29.0) due to an accidental main-to-release-branch merge and has
+been yanked; 0.3.2 is the version to use.
+
 ## [0.3.1] — 2026-09-03
 
 Backport of the external-data byte-loading fix to the 0.3 line (ONNX Runtime 1.27
