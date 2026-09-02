@@ -12,10 +12,10 @@ optimization, and execution providers, and leaves scheduling to you.
 
 ## Status
 
-- Latest **published** wrapper: `st-zrt` **0.3.0** (crates.io).
-- This checkout is the **unpublished 0.4.0 release candidate**; the changelog describes it.
-- `st-zrt-sys` candidate: **1.29.0**, mirroring the bundled **ONNX Runtime 1.29.0 / API 29**
-  exactly.
+- Current release: `st-zrt` **0.4.0** with `st-zrt-sys` **1.29.0**, mirroring the
+  bundled **ONNX Runtime 1.29.0 / API 29** exactly; publication is automated from the
+  default branch. The changelog describes this and previous releases.
+- Previous published line: `st-zrt` **0.3.0** / `st-zrt-sys` **1.27.1** (crates.io).
 - Supported ONNX Runtime line for this release: **1.29** only (bundled by `st-zrt-sys`;
   another 1.29.x runtime may be supplied via `ST_ZRT_ORT_PATH`). `Environment` rejects every
   other line at creation — including 1.27/1.28, which remain supported by the 0.3.x line.

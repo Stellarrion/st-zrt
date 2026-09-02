@@ -34,8 +34,9 @@ unsafe FFI boundary, build-script download/extraction logic, and CI definitions.
 
 ## Supported versions and platforms
 
-- The current published line is `st-zrt` 0.3.0 / `st-zrt-sys` 1.27.1. The staged
-  release-candidate line is `st-zrt` 0.4.0 / `st-zrt-sys` 1.29.0.
+- The current published line is `st-zrt` 0.4.0 / `st-zrt-sys` 1.29.0 (publication is
+  automated from the default branch). The previous line, `st-zrt` 0.3.0 /
+  `st-zrt-sys` 1.27.1, remains on crates.io.
 - Linux x86_64 is the only platform with native link and test coverage (CI). Linux
   aarch64 and Windows x64 are compile-only in CI; macOS arm64 builds download the ORT
   archive but have no automated coverage; macOS x86_64 is not supported by the ONNX
