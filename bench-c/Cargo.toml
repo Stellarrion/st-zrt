@@ -16,9 +16,10 @@ publish = false
 [dependencies]
 # Path pin for the A/B/C comparison against this checkout; the explicit version keeps the
 # requirement non-wildcard for cargo-deny and documents the expected wrapper version.
-# No version requirement: this unpublished bench crate always tracks the in-tree st-zrt,
-# so wrapper minor bumps cannot break its resolution.
-st-zrt = { path = "../st-zrt" }
+# Pinned to the in-tree wrapper version on purpose: the wildcard-dependency ban forbids
+# a bare path dep, and a wrapper minor bump must update this pin in the same change
+# (resolution fails loudly otherwise).
+st-zrt = { path = "../st-zrt", version = "=0.4.0" }
 
 [features]
 default = []
