@@ -7,7 +7,7 @@ FFI, so correctness of the native boundary outranks convenience or micro-optimiz
 
 - Rust **1.85 or newer** (MSRV, edition 2024). `rust-toolchain.toml` selects a stable
   channel with rustfmt/clippy automatically.
-- The build downloads a SHA-pinned ONNX Runtime 1.27.0 archive on first use, or set
+- The build downloads a SHA-pinned ONNX Runtime 1.29.0 archive on first use, or set
   `ST_ZRT_ORT_PATH` to a pre-extracted distribution containing `include/` and `lib/`
   (required on Windows; the build script extracts `.tgz` archives only).
 - Native tests need the downloaded `lib/` directory on the loader path
@@ -31,7 +31,7 @@ Notes:
 - `RUST_TEST_THREADS=1` serializes tests that create ONNX Runtime environments.
 - The feature matrix (no-default-features combinations for `st-zrt-sys` and `st-zrt`)
   is enforced by CI and `scripts/release-check.sh`; keep changes inside MSRV 1.85.
-- Changes to the API 27 bindings must regenerate byte-for-byte
+- Changes to the API 29 bindings must regenerate byte-for-byte
   (`scripts/check-generated-bindings.sh`).
 - CUDA lanes/graphs: test with fresh changing inputs, capture/replay ordering, and
   real hardware where possible; follow the local release checklist.
