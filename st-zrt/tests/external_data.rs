@@ -2,18 +2,39 @@
 //!
 //! ORT resolves external-data paths relative to the model file's directory, so a plain
 //! buffer load cannot resolve them. `from_bytes_with_external_data` spools the buffer
-//! next to the external-data directory and loads through the path.
+//! next to the external-data directory and loads through the path. The external-data
+//! blob is materialized by the test into a temp directory — nothing binary is committed.
 
 use st_zrt::{
     Environment, GraphOptimizationLevel, MemoryInfo, OwnedValue, Session, SessionOptions, Tensor,
 };
 
-fn fixture(name: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("external_data")
-        .join(name)
+struct TempDir(std::path::PathBuf);
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A temp directory holding a copy of `ext_add.onnx` plus its external-data file
+/// (four f32 values of 2.0 — exactly what the model's external reference declares).
+fn fixture_dir() -> TempDir {
+    let dir = std::env::temp_dir().join(format!(
+        "st-zrt-extdata-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let model = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/external_data/ext_add.onnx");
+    std::fs::copy(&model, dir.join("ext_add.onnx")).expect("copy model");
+    let data: Vec<f32> = vec![2.0; 4];
+    let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+    std::fs::write(dir.join("ext_add.onnx.data"), bytes).expect("write external data");
+    TempDir(dir)
 }
 
 fn run(session: &Session) -> Vec<f32> {
@@ -31,13 +52,9 @@ fn run(session: &Session) -> Vec<f32> {
 
 #[test]
 fn external_data_byte_load_resolves_and_runs() {
-    let model_path = fixture("ext_add.onnx");
-    let dir = model_path.parent().unwrap(); // holds the model and its .data file
-    let bytes = std::fs::read(fixture("ext_add.onnx")).expect("model bytes");
-    assert!(
-        std::fs::read(dir.join("ext_add.onnx.data")).is_ok(),
-        "external data file present"
-    );
+    let fx = fixture_dir();
+    let dir = &fx.0;
+    let bytes = std::fs::read(dir.join("ext_add.onnx")).expect("model bytes");
 
     let env = Environment::new().expect("env");
     let opts = SessionOptions::new().with_opt_level(GraphOptimizationLevel::Basic);
@@ -45,8 +62,8 @@ fn external_data_byte_load_resolves_and_runs() {
     // Reference: path-based load (ORT resolves external data relative to the model file).
     let via_path = Session::new(
         &env,
-        fixture("ext_add.onnx").to_str().unwrap(),
-        SessionOptions::new().with_opt_level(GraphOptimizationLevel::Basic),
+        dir.join("ext_add.onnx").to_str().unwrap(),
+        opts.clone(),
     )
     .expect("path load");
     let expected = run(&via_path);
@@ -73,16 +90,11 @@ fn external_data_byte_load_resolves_and_runs() {
 
 #[test]
 fn plain_byte_load_of_external_data_model_is_rejected_or_selfcontained() {
-    // Documents the gap being fixed: a plain buffer load has no base directory.
-    let dir = fixture("ext_add.onnx").parent().unwrap().to_path_buf();
-    let bytes = std::fs::read(dir.join("ext_add.onnx")).expect("model bytes");
+    let fx = fixture_dir();
+    let bytes = std::fs::read(fx.0.join("ext_add.onnx")).expect("model bytes");
     let env = Environment::new().expect("env");
     match Session::from_bytes(&env, &bytes, SessionOptions::new()) {
         Err(_) => {}, // rejected by ORT: expected on this runtime line
-        Ok(s) => {
-            // If this runtime line tolerates unresolved external data, the values would
-            // be wrong; assert they are right to catch silent misbehavior.
-            assert_eq!(run(&s), vec![3.0, 4.0, 5.0, 6.0]);
-        },
+        Ok(s) => assert_eq!(run(&s), vec![3.0, 4.0, 5.0, 6.0]),
     }
 }
