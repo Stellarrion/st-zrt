@@ -1,6 +1,6 @@
 //! Large-tensor benches on the synthetic relay model (Y = X + C).
 //!
-//! Arena note (corrected 2026-06-19, see RESULTS.md §8): the zero-copy input path
+//! Arena note (corrected 2026-06-19): the zero-copy input path
 //! (`CreateTensorWithDataAsOrtValue` over a caller buffer) is STABLE with the BFCArena
 //! ENABLED (ORT's default) — verified across arena×pattern×size (4m/16m), under both
 //! criterion's measurement loop and a tight plain loop. An earlier st-zrt build crashed

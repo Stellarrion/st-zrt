@@ -2,8 +2,7 @@
 //!
 //! First slice uses MNIST (ort's own hosted test model — single float input
 //! `[1,1,28,28]`, single float output) purely to *prove the harness compiles
-//! and runs end-to-end*. The real workload models (MiniLM-L6-v2, MobileNetV3)
-//! land in task #3; the harness is model-pluggable.
+//! and runs end-to-end*. The harness is model-pluggable.
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -32,6 +31,20 @@ fn ensure_cached(name: &str, url: &str) -> std::io::Result<PathBuf> {
         }
     }
     Ok(path)
+}
+
+/// Path of the locally generated single-Identity model (input/output `[1, 65536]`
+/// f32) used as a kernel-free wrapper-overhead probe. Not downloaded: it must be
+/// generated locally with `bench/tools/gen_models.py`.
+pub fn identity_path() -> std::io::Result<PathBuf> {
+    let path = cache_dir().join("identity_256k.onnx");
+    if path.exists() {
+        Ok(path)
+    } else {
+        Err(std::io::Error::other(
+            "identity_256k.onnx missing from bench/models (generate it locally)",
+        ))
+    }
 }
 
 pub fn ensure_mnist() -> std::io::Result<PathBuf> {

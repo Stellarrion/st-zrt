@@ -109,8 +109,8 @@ fn bench_c_iobinding(c: &mut Criterion) {
     // view + a preallocated [1,10] output buffer are bound by name and reused — no per-run
     // name marshaling, no per-run input/output value allocation. On MNIST the output is
     // 40 bytes, so the E2 (no-output-alloc) win is negligible here; the large-output win
-    // needs a bigger model and remains unmeasured (see docs/v0.3-benchmark-results.md
-    // for what has actually been characterized).
+    // needs a bigger model and remains unmeasured (see the local benchmark results
+    // document for what has actually been characterized).
     let model = models::ensure_mnist().expect("mnist");
     let path = model.to_str().unwrap();
     let env = st_zrt::Environment::new().unwrap();

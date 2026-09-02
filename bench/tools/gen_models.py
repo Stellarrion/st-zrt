@@ -7,8 +7,8 @@ These are synthetic relay models (``Y = X + C``, C a constant initializer of 1.0
 single float tensor input ``X [1, n]`` and an identically-shaped float output ``Y``. They
 let us measure the tensor-size-dependent costs the MNIST model cannot (3 KB in / 40 B out):
 
-  - **Large INPUT**  - the O3 copy-vs-zero-copy crossover (RESULTS.md sec.3, ~5 MB).
-  - **Large OUTPUT** - the E2 IoBinding zero-copy-output win (RESULTS.md sec.7).
+  - **Large INPUT**  - the O3 copy-vs-zero-copy crossover (~5 MB).
+  - **Large OUTPUT** - the E2 IoBinding zero-copy-output win.
 
 ``Add(X, C)`` (two DISTINCT inputs: the feed ``X`` and the constant ``C``) is used because it
 is the realistic op (a biased add) and keeps the output genuinely materialized into a distinct

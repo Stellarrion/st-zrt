@@ -18,7 +18,7 @@ use std::os::raw::c_char;
 use std::os::raw::c_int;
 
 /// libonnxruntime API version we bind (1.27.0 → API version 27).
-pub const API_VERSION: u32 = 27;
+pub const API_VERSION: u32 = 29;
 
 /// The exact libonnxruntime version this crate acquires and links by default.
 ///
@@ -28,17 +28,18 @@ pub const ORT_VERSION: &str = env!("ST_ZRT_ORT_VERSION");
 
 /// libonnxruntime release lines whose runtime these API-{API_VERSION} bindings support.
 ///
-/// The default acquisition is [`ORT_VERSION`] (`1.27`). A `1.28` runtime is also supported:
-/// the ORT C API is append-only (API 27 → 28 adds `KernelContext_GetSyncStream` and removes
-/// nothing), so the API-27 table obtained via `GetApi(27)` is valid against 1.28.x. Bind a
-/// different runtime by pointing `ST_ZRT_ORT_PATH` at an extracted onnxruntime directory
-/// (see the build-script docs). The safe wrapper rejects any other line at
-/// `Environment` creation; [`runtime_version_supported`] is the predicate.
-pub const SUPPORTED_RUNTIME_LINES: &[&str] = &["1.27", "1.28"];
+/// The default acquisition is [`ORT_VERSION`] (`1.29`). Only the `1.29` line is supported:
+/// the bindings request the API-29 table via `GetApi(29)`, which an older runtime cannot
+/// serve (the C API grows append-only, so older libraries expose fewer table entries), and
+/// newer lines are unvalidated. Bind a different 1.29.x runtime by pointing
+/// `ST_ZRT_ORT_PATH` at an extracted onnxruntime directory (see the build-script docs).
+/// The safe wrapper rejects every other line at `Environment` creation;
+/// [`runtime_version_supported`] is the predicate.
+pub const SUPPORTED_RUNTIME_LINES: &[&str] = &["1.29"];
 
 /// `GetVersionString()` of the loaded libonnxruntime, if the entry point is callable.
 ///
-/// Returns the runtime's own version string (e.g. `"1.28.1"`), not the pinned
+/// Returns the runtime's own version string (e.g. `"1.29.0"`), not the pinned
 /// [`ORT_VERSION`]: it reports what the dynamic loader actually resolved.
 #[inline]
 pub fn runtime_version_string() -> Option<String> {
@@ -568,13 +569,23 @@ mod tests {
 
     #[test]
     fn runtime_version_matching() {
-        for accepted in ["1.27.0", "1.27.999", "1.28.0", "1.28.1", "1.28.0-rc2"] {
+        for accepted in ["1.29.0", "1.29.999", "1.29.1", "1.29.0-rc2"] {
             assert!(
                 runtime_version_supported(accepted),
                 "should accept {accepted:?}"
             );
         }
-        for rejected in ["1.26.0", "1.99.0", "2.0.0", "1.2", "1", "", "onnxruntime"] {
+        for rejected in [
+            "1.26.0",
+            "1.27.1",
+            "1.28.1",
+            "1.99.0",
+            "2.0.0",
+            "1.2",
+            "1",
+            "",
+            "onnxruntime",
+        ] {
             assert!(
                 !runtime_version_supported(rejected),
                 "should reject {rejected:?}"
