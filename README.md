@@ -25,14 +25,12 @@ Runtime kernels, graph optimization, or execution providers.
 
 ## Install and quick start
 
-Until 0.4.0 is published, use the published 0.3.0; after it lands:
-
 ```toml
 [dependencies]
 st-zrt = "0.4.0"
 ```
 
-Until then, run against this checkout:
+(0.3.0 is on crates.io today; 0.4.0 lands with this branch. To try the checkout directly:)
 
 ```bash
 cargo run -p st-zrt --example basic_inference -- path/to/model.onnx
@@ -121,41 +119,12 @@ binding freshness with `ServingLane::set_rebind_inputs_each_run(true)` or
 composable `BufferSpec` values (`AUTO`, `LATENCY`, `THROUGHPUT_LARGE`, `PINNED_HOST`,
 `CUDA_PINNED`, or `BufferSpec::aligned(4096).prefault()`).
 
-Deep dives: `docs/architecture.md` and `docs/cuda-graph-paths.md` (local-only).
-
-## Performance (scoped)
-
-All numbers below are local measurements from `docs/v0.3-benchmark-results.md`
-(local-only; 2026-08-13; AMD
-Ryzen 9 7900, RTX 4090; characterization, not cross-machine guarantees). They compare
-the Rust wrapper/session/I/O path around ONNX Runtime; ORT still executes the graph.
-
-- CPU: on the small relay fixture a prepared lane (~19.0 µs), prepared IoBinding
-  (~18.8 µs), and a direct one-thread run (~19.6 µs) are within about 1 µs of each
-  other — wrapper cost is already near the noise floor once prepared. The linked report
-  retains the ResNet-50 A/B and counting-allocator evidence (0 Rust allocations/run for
-  the prepared lane); the measured benefit is hot-path preparation, not faster kernels.
-- CUDA graph replay (thenlper/gte-small, batch 1, seq 128, shared GPU):
-
-| Path | Median | vs baseline | Correctness |
-|---|---:|---:|---|
-| baseline (rebind, no graph) | 750.5 µs | 1.00× | reference |
-| host-input graph | 586.2 µs | 1.28× | **stale** (max abs diff 2.9210) |
-| device-input graph | 639.5 µs | 1.17× | correct (max abs diff 0.0035) |
-
-- The correct device-input graph gains about 1.2× (1.19× in a lower-contention rerun);
-  the aspirational 1.5× target was **not met** on this fixture. The faster host-input
-  number is invalid: replays read stale device memory, which is why that configuration
-  is rejected at construction.
-- Reproduce with `scripts/benchmark-zrt.sh` and the `bench`/`bench-c` harnesses.
-
 ## CUDA (advanced, optional)
 
 The `cuda` feature links the GPU ONNX Runtime package (CUDA 13) plus a system CUDA 13
 toolkit and cuDNN 9, on Linux x86_64 only. CUDA graphs require device-resident lane
 inputs refreshed on a retained user stream; capture is device-wide serialized.
-Start with `docs/cuda-graph-paths.md` (local-only) and the
-`cuda_inference` / `bert_cuda_probe` examples.
+See the `cuda_inference` / `bert_cuda_probe` examples.
 
 GPU-architecture and privacy notes for the bundled 1.29.0 GPU package: it ships SASS for
 sm_75 through sm_90a but **no sm_100a SASS and no PTX** (upstream packaging change), so
@@ -174,9 +143,7 @@ it (`st-zrt` never sets process environment variables itself).
 | `custom-ops` | safe Rust custom-operator authoring |
 | `model-editor` | graph editing, AOT compile, interop, custom-EP authoring |
 
-Known platform and acquisition limits are listed in [`SUPPORT.md`](SUPPORT.md);
-CUDA-graph lease semantics and path-selection limits are documented in
-`docs/cuda-graph-paths.md` (local-only).
+Known platform and acquisition limits are listed in [`SUPPORT.md`](SUPPORT.md).
 
 ## Project
 
@@ -187,9 +154,8 @@ CUDA-graph lease semantics and path-selection limits are documented in
   expert baseline (kept out of the workspace because `ort-sys` and `st-zrt-sys` both link
   `onnxruntime`).
 
-Tracked docs: [CHANGELOG](CHANGELOG.md) · [SUPPORT](SUPPORT.md) ·
-[CONTRIBUTING](CONTRIBUTING.md). Deep-dive documents live in `docs/` locally and are
-not published.
+Docs: [CHANGELOG](CHANGELOG.md) · [SUPPORT](SUPPORT.md) ·
+[CONTRIBUTING](CONTRIBUTING.md).
 
 Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security: [`SECURITY.md`](SECURITY.md).
 

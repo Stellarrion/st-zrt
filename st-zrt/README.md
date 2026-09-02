@@ -61,8 +61,8 @@ fn main() -> st_zrt::Result<()> {
 | CUDA graph hot path | `DynamicIoRuntime` + `CudaConfig::graph_replay` + device inputs |
 
 A *lane* binds caller-owned input/output buffers once; serving then mutates the same
-buffers and runs. The repository's benchmark report records the prepared CPU lane at zero
-Rust allocations per run after warmup; native ONNX Runtime allocation is measured separately.
+buffers and runs — after warmup, a prepared lane performs no per-run Rust allocation
+for bindings or marshaling.
 CUDA/TensorRT callers that mutate reusable CPU input buffers can
 opt into per-run rebinding with `ServingLane::set_rebind_inputs_each_run(true)` or
 `DynamicIoOptions::with_rebind_inputs_each_run(true)`. Reusable-buffer placement is
@@ -104,9 +104,6 @@ configured with composable `BufferSpec` policies (`AUTO`, `LATENCY`,
 
 - [API docs (docs.rs)](https://docs.rs/st-zrt)
 - [CHANGELOG](https://github.com/Stellarrion/st-zrt/blob/main/CHANGELOG.md)
-
-Architecture notes, CUDA-graph design, and benchmark results are maintained locally in
-the source checkout and are not published.
 
 The raw generated FFI lives in the
 [`st-zrt-sys`](https://github.com/Stellarrion/st-zrt/blob/main/st-zrt-sys/README.md)

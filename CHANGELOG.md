@@ -30,8 +30,7 @@ API 29, and the supported-runtime policy narrows to the 1.29 line.
 - The 1.29.0 `gpu_cuda13` package drops **sm_100a SASS and all PTX** (1.27.0 shipped
   234 sm_100a SASS entries and 234 sm_120 PTX entries; 1.28.1 shipped both; 1.29.0
   ships neither). B100/B200/GB200 GPUs are therefore unsupported with no forward-JIT
-  fallback. sm_75 through sm_90a SASS coverage is unchanged-to-larger — mainstream
-  GPUs (including sm_89) are unaffected.
+  fallback. sm_75 through sm_90a SASS coverage is unchanged-to-larger.
 - Telemetry: the 1.29.0 `gpu_cuda13` package ships with POSIX telemetry compiled in;
   the linux-x64 CPU package does not. Set `ORT_DISABLE_TELEMETRY=1` in the process
   environment before initialization to disable it — `st-zrt` deliberately does not set
@@ -85,9 +84,9 @@ was consolidated into the canonical `ServingLane`/`DynamicIoRuntime` design befo
 - `st-zrt 0.3` now supports two ORT release lines: **1.27** (the version `st-zrt-sys 1.27.1` acquires and links by default) and **1.28** (a bring-your-own runtime bound via `ST_ZRT_ORT_PATH`). The ORT C API is append-only — API 27 → 28 adds `KernelContext_GetSyncStream` and removes nothing — so the API-27 function table remains valid against 1.28.x; the bindings, tests, and `GetApi(27)` dispatch are unchanged.
 - New public surface: `st_zrt_sys::ORT_VERSION` (the exact bundled pin, injected by `build.rs` from the same constant that drives the download/sha256 table), `st_zrt_sys::SUPPORTED_RUNTIME_LINES` (`["1.27", "1.28"]`), `runtime_version_string()` (the loaded runtime's `GetVersionString()`), and `runtime_version_supported()`; `st-zrt` re-exports `ORT_VERSION` and `SUPPORTED_RUNTIME_LINES`.
 - Every `Environment` constructor now enforces the supported-line policy before touching ORT: a wrong-line `libonnxruntime` (older, newer, or a different major) fails with an error naming the loaded version, the supported lines, and the bundled pin, instead of loading and misbehaving far from the cause.
-- Compatibility evidence (CPU): the full default-features suite (199 tests, 10 binaries) and the all-non-CUDA feature matrix (`half,serde,ep,custom-ops,model-editor`; 480 tests incl. custom-op and model-editor integration tests) pass against **ONNX Runtime 1.28.1** (official GitHub `linux-x64` tgz) via `ST_ZRT_ORT_PATH`, including the new loaded-runtime assertions; the same suites pass against the bundled 1.27.0, and the loaded library is verified by `ldd` to be the 1.28.1 build.
-- Compatibility evidence (CUDA): the `cuda_ep` suite (30 tests: graph capture/replay, device-resident I/O, GPU chaining, error/panic fencing, prebuilt buckets, stream identity) and the `cuda_inference`, `primed_lane`, `custom_op`, and `ep_config` examples pass against the **ONNX Runtime 1.28.1 `gpu_cuda13` package** on an RTX 4090 with the CUDA 13.3 toolkit and system cuDNN 9; linkage again verified via `ldd`. The legacy-fmha template pruning (Ampere trait count 6108 → 2925) is confirmed to land in 1.28 with no capability loss (`onnxruntime::flash` still covers fp16 and bf16, never fp32).
-- Operational note: running this repository's own test binaries against an `ST_ZRT_ORT_PATH` override additionally needs `LD_LIBRARY_PATH=<ort>/lib` — Cargo injects only build-script out dirs into the test-runner loader path, and the override dir lives outside `target/`. Published crates follow the documented downstream loader setup unchanged.
+- Compatibility (CPU): the full test suite and feature matrix pass against **ONNX Runtime 1.28.1** (official `linux-x64` package) via `ST_ZRT_ORT_PATH`, including the new loaded-runtime assertions; the same suites pass against the bundled 1.27.0.
+- Compatibility (CUDA): the CUDA EP suite and the `cuda_inference`, `primed_lane`, `custom_op`, and `ep_config` examples pass against the **ONNX Runtime 1.28.1 `gpu_cuda13` package**. The legacy-fmha template pruning in 1.28 (Ampere trait count 6108 → 2925) loses no capability: `onnxruntime::flash` still covers fp16 and bf16, never fp32.
+- Operational note: running this repository's own test binaries against an `ST_ZRT_ORT_PATH` override additionally needs `LD_LIBRARY_PATH=<ort>/lib`; published crates follow the documented downstream loader setup unchanged.
 
 ### Added — serving and CUDA graphs
 - Device-resident dynamic outputs, nonblocking exact-stream completion, and owned GPU-to-GPU chaining through reusable CUDA events.
