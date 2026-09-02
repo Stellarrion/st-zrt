@@ -43,5 +43,5 @@ unsafe FFI boundary, build-script download/extraction logic, and CI definitions.
 - Reports against other platforms are accepted as compile-only findings.
 
 Fixes are released through the repository's approval-gated release process
-(`scripts/release-check.sh` and `docs/v0.3-release-checklist.md`); there is no
+(`scripts/release-check.sh` and the local release checklist); there is no
 automated publication.

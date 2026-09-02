@@ -34,7 +34,7 @@ Notes:
 - Changes to the API 27 bindings must regenerate byte-for-byte
   (`scripts/check-generated-bindings.sh`).
 - CUDA lanes/graphs: test with fresh changing inputs, capture/replay ordering, and
-  real hardware where possible; follow `docs/v0.3-release-checklist.md`.
+  real hardware where possible; follow the local release checklist.
 - The benchmark crates `bench/` (incumbent `ort`) and `bench-c/` (`st-zrt`) are
   standalone workspaces with their own lockfiles; keep their dependency policy green.
 
@@ -43,6 +43,6 @@ Notes:
 Commits, tags, and publication are explicit approval boundaries. Do not push, tag, or
 publish; the tag-bound gates in `scripts/release-check.sh`
 (`pre-sys-publish`, `post-sys-publish`) document the reviewed sequence.
-See `docs/v0.3-release-checklist.md`.
+See the local release checklist.
 
 Security issues go through [SECURITY.md](SECURITY.md), never public issues.
