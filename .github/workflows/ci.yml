@@ -99,7 +99,10 @@ jobs:
       - name: Check extension feature surface
         run: cargo check -p st-zrt --features model-editor,serde,ep,custom-ops --locked
 
-      - name: Check independent feature combinations
+      # Checks and rustdoc builds compile without linking native ORT (the DOCS_RS guard
+      # keeps the build script offline). Test binaries DO link the shared library, so the
+      # test commands run in the native step below, which downloads the pinned archive.
+      - name: Check independent feature combinations (compile + docs, offline)
         env:
           DOCS_RS: "1"
           RUSTDOCFLAGS: -Dwarnings
@@ -111,12 +114,17 @@ jobs:
             cargo doc -p st-zrt-sys --no-deps --no-default-features --features "$features" --locked
           done
           cargo check -p st-zrt --no-default-features --locked
-          cargo test -p st-zrt --tests --no-default-features --locked
           cargo doc -p st-zrt --no-deps --no-default-features --locked
-          cargo test -p st-zrt --doc --no-default-features --locked
           for features in half serde ep custom-ops model-editor ep,serde custom-ops,model-editor half,serde,ep,custom-ops,model-editor; do
             cargo check -p st-zrt --no-default-features --features "$features" --locked
             cargo doc -p st-zrt --no-deps --no-default-features --features "$features" --locked
+          done
+
+      - name: Test independent feature combinations (native)
+        run: |
+          cargo test -p st-zrt --tests --no-default-features --locked
+          cargo test -p st-zrt --doc --no-default-features --locked
+          for features in half serde ep custom-ops model-editor ep,serde custom-ops,model-editor half,serde,ep,custom-ops,model-editor; do
             cargo test -p st-zrt --doc --no-default-features --features "$features" --locked
           done
 
