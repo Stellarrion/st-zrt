@@ -1,5 +1,5 @@
 //! Arena/mem-pattern matrix for the lane-local zero-copy path.
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{Environment, GraphOptimizationLevel, MemoryInfo, SessionOptions};
 use st_zrt_bench_c::models;
 
@@ -17,11 +17,7 @@ fn opts(disable_arena: bool, disable_mem_pattern: bool) -> SessionOptions {
 }
 
 fn bench_lane(
-    c: &mut Criterion,
-    name: &str,
-    model_path: &str,
-    input_shape: &[i64],
-    output_shape: &[i64],
+    c: &mut Criterion, name: &str, model_path: &str, input_shape: &[i64], output_shape: &[i64],
     opts: SessionOptions,
 ) {
     let env = Environment::new().unwrap();

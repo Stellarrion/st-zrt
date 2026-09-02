@@ -31,7 +31,7 @@ fn flag(var: &str, default_on: bool) -> bool {
             !v.eq_ignore_ascii_case("off")
                 && !v.eq_ignore_ascii_case("0")
                 && !v.eq_ignore_ascii_case("false")
-        }
+        },
         Err(_) => default_on,
     }
 }

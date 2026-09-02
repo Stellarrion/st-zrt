@@ -8,7 +8,7 @@
 //!   cargo bench --bench crash_repro                     # arena ON, pattern ON
 //!   ZRT_PATTERN=off cargo bench --bench crash_repro     # pattern off
 //!   ZRT_LABEL=16m cargo bench --bench crash_repro       # larger I/O
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{Environment, GraphOptimizationLevel, MemoryInfo, SessionOptions, Tensor};
 use st_zrt_bench_c::models;
 

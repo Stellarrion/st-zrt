@@ -17,6 +17,7 @@ use crate::session_options::SessionOptions;
 use crate::{Result, api, check, sys};
 use std::ffi::{CString, c_char, c_void};
 use std::ptr;
+use std::sync::Arc;
 
 /// A supported execution provider. The options-struct path (CUDA/TRT/ROCm/CANN/DNNL).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,53 +32,6 @@ pub enum EpProvider {
     OpenVinoV2,
     /// VitisAI — key/value append path (`SessionOptionsAppendExecutionProvider_VitisAI`).
     VitisAi,
-}
-
-/// Built-in CUDA execution-provider presets.
-///
-/// These are pure configuration. They do not load CUDA by themselves; they become active when
-/// converted into [`CudaProviderOptions`] and queued on [`SessionOptions`] with
-/// [`SessionOptions::with_cuda_options`] or [`SessionOptions::with_cuda_preset`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum CudaPreset {
-    /// Latency/throughput preset when memory is not the primary constraint.
-    ///
-    /// Uses exhaustive cuDNN search, power-of-two arena growth, default-stream copies, and TF32.
-    Performance { device_id: i32 },
-    /// Static-shape graph replay preset.
-    ///
-    /// CUDA graph capture is useful only when model shapes and memory addresses are stable
-    /// across runs, which matches ZRT's reusable lane buffers.
-    CudaGraph { device_id: i32 },
-    /// Bounded-memory preset.
-    ///
-    /// `gpu_mem_limit` is passed through to ORT in bytes and arena growth is kept closer to
-    /// requested allocation sizes.
-    LowMemory {
-        device_id: i32,
-        gpu_mem_limit: usize,
-    },
-}
-
-impl CudaPreset {
-    #[inline]
-    pub fn performance(device_id: i32) -> Self {
-        Self::Performance { device_id }
-    }
-
-    #[inline]
-    pub fn cuda_graph(device_id: i32) -> Self {
-        Self::CudaGraph { device_id }
-    }
-
-    #[inline]
-    pub fn low_memory(device_id: i32, gpu_mem_limit: usize) -> Self {
-        Self::LowMemory {
-            device_id,
-            gpu_mem_limit,
-        }
-    }
 }
 
 /// CUDA device arena growth strategy.
@@ -118,17 +72,300 @@ impl CudaCudnnConvAlgoSearch {
     }
 }
 
+/// Placement and sequencing policy for CUDA execution-provider inputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum DeviceInputPolicy {
+    /// CUDA EP copies inputs on its default stream (`do_copy_in_default_stream=1`).
+    DefaultStream,
+    /// CUDA EP uses one unified provider-level stream (`use_ep_level_unified_stream=1`).
+    UnifiedStream,
+    /// CUDA EP uses the owned caller stream retained by this configuration.
+    UserStream,
+}
+
+/// Typed CUDA execution-provider configuration.
+///
+/// Unknown future string options remain available through [`Self::with_raw`]. A user-stream policy
+/// can only be built with `CudaConfig::graph_replay` or `CudaConfig::with_user_stream`, both of which retain
+/// an `Arc<CudaStream>`; session construction transfers that guard into `SessionInner`.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CudaConfig {
+    device_id: i32,
+    arena: CudaArenaExtendStrategy,
+    cudnn_search: CudaCudnnConvAlgoSearch,
+    tf32: bool,
+    cuda_graph: bool,
+    graph_strict_mode: bool,
+    device_inputs: DeviceInputPolicy,
+    mem_limit: Option<usize>,
+    cudnn_max_workspace: bool,
+    prefer_nhwc: bool,
+    extra: Vec<(String, String)>,
+    #[cfg(feature = "cuda")]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    stream: Option<Arc<crate::CudaStream>>,
+}
+
+impl CudaConfig {
+    /// Latency/throughput preset when memory is not the primary constraint.
+    pub fn performance(device_id: i32) -> Self {
+        Self {
+            device_id,
+            arena: CudaArenaExtendStrategy::NextPowerOfTwo,
+            cudnn_search: CudaCudnnConvAlgoSearch::Exhaustive,
+            tf32: true,
+            cuda_graph: false,
+            graph_strict_mode: false,
+            device_inputs: DeviceInputPolicy::DefaultStream,
+            mem_limit: None,
+            cudnn_max_workspace: false,
+            prefer_nhwc: false,
+            extra: Vec::new(),
+            #[cfg(feature = "cuda")]
+            stream: None,
+        }
+    }
+
+    /// Bounded-memory preset with conservative arena growth and heuristic cuDNN search.
+    pub fn low_memory(device_id: i32, gpu_mem_limit: usize) -> Self {
+        Self {
+            arena: CudaArenaExtendStrategy::SameAsRequested,
+            cudnn_search: CudaCudnnConvAlgoSearch::Heuristic,
+            mem_limit: Some(gpu_mem_limit),
+            ..Self::performance(device_id)
+        }
+    }
+
+    /// Static-shape CUDA-graph replay on an owned caller stream.
+    #[cfg(feature = "cuda")]
+    pub fn graph_replay(device_id: i32, stream: &Arc<crate::CudaStream>) -> Result<Self> {
+        if stream.device_id() != device_id {
+            return Err(crate::Error::new(
+                -1,
+                format!(
+                    "CUDA stream belongs to device {}, but config targets device {device_id}",
+                    stream.device_id()
+                ),
+            ));
+        }
+        Ok(Self {
+            cuda_graph: true,
+            graph_strict_mode: true,
+            device_inputs: DeviceInputPolicy::UserStream,
+            stream: Some(Arc::clone(stream)),
+            ..Self::performance(device_id)
+        })
+    }
+
+    #[inline]
+    pub const fn device_id(&self) -> i32 {
+        self.device_id
+    }
+
+    #[inline]
+    pub const fn device_input_policy(&self) -> DeviceInputPolicy {
+        self.device_inputs
+    }
+
+    #[inline]
+    pub const fn cuda_graph_enabled(&self) -> bool {
+        self.cuda_graph
+    }
+
+    pub fn with_raw(mut self, key: impl Into<String>, value: impl Into<String>) -> Result<Self> {
+        let key = key.into();
+        if is_reserved_cuda_key(&key) {
+            return Err(crate::Error::new(
+                -1,
+                format!("CUDA option {key:?} is typed and cannot be overridden through with_raw"),
+            ));
+        }
+        upsert_string_entry(&mut self.extra, key, value.into());
+        Ok(self)
+    }
+
+    #[inline]
+    pub fn with_mem_limit(mut self, bytes: usize) -> Self {
+        self.mem_limit = Some(bytes);
+        self
+    }
+
+    #[inline]
+    pub fn with_cuda_graph(mut self, enabled: bool) -> Self {
+        self.cuda_graph = enabled;
+        self
+    }
+
+    #[inline]
+    pub fn with_graph_strict_mode(mut self, enabled: bool) -> Self {
+        self.graph_strict_mode = enabled;
+        self
+    }
+
+    #[inline]
+    pub fn with_tf32(mut self, enabled: bool) -> Self {
+        self.tf32 = enabled;
+        self
+    }
+
+    #[inline]
+    pub fn with_cudnn_max_workspace(mut self, enabled: bool) -> Self {
+        self.cudnn_max_workspace = enabled;
+        self
+    }
+
+    #[inline]
+    pub fn with_prefer_nhwc(mut self, enabled: bool) -> Self {
+        self.prefer_nhwc = enabled;
+        self
+    }
+
+    #[inline]
+    pub fn with_device_input_policy(mut self, policy: DeviceInputPolicy) -> Result<Self> {
+        if policy == DeviceInputPolicy::UserStream {
+            #[cfg(not(feature = "cuda"))]
+            return Err(crate::Error::new(
+                -1,
+                "DeviceInputPolicy::UserStream requires the `cuda` feature and an owned stream",
+            ));
+            #[cfg(feature = "cuda")]
+            if self.stream.is_none() {
+                return Err(crate::Error::new(
+                    -1,
+                    "DeviceInputPolicy::UserStream requires with_user_stream",
+                ));
+            }
+        }
+        self.device_inputs = policy;
+        #[cfg(feature = "cuda")]
+        if policy != DeviceInputPolicy::UserStream {
+            self.stream = None;
+        }
+        Ok(self)
+    }
+
+    #[cfg(feature = "cuda")]
+    pub fn with_user_stream(mut self, stream: &Arc<crate::CudaStream>) -> Result<Self> {
+        if stream.device_id() != self.device_id {
+            return Err(crate::Error::new(
+                -1,
+                format!(
+                    "CUDA stream belongs to device {}, but config targets device {}",
+                    stream.device_id(),
+                    self.device_id
+                ),
+            ));
+        }
+        self.device_inputs = DeviceInputPolicy::UserStream;
+        self.stream = Some(Arc::clone(stream));
+        Ok(self)
+    }
+
+    fn provider_options(&self) -> CudaProviderOptions {
+        let mut options = CudaProviderOptions::new()
+            .device_id(self.device_id)
+            .arena_extend_strategy(self.arena)
+            .cudnn_conv_algo_search(self.cudnn_search)
+            .enable_cuda_graph(self.cuda_graph)
+            .enable_skip_layer_norm_strict_mode(self.graph_strict_mode)
+            .use_tf32(self.tf32)
+            .cudnn_conv_use_max_workspace(self.cudnn_max_workspace)
+            .prefer_nhwc(self.prefer_nhwc);
+        options = match self.device_inputs {
+            DeviceInputPolicy::DefaultStream => options
+                .do_copy_in_default_stream(true)
+                .use_ep_level_unified_stream(false),
+            DeviceInputPolicy::UnifiedStream => options
+                .do_copy_in_default_stream(true)
+                .use_ep_level_unified_stream(true),
+            DeviceInputPolicy::UserStream => options
+                .do_copy_in_default_stream(true)
+                .use_ep_level_unified_stream(false),
+        };
+        if let Some(limit) = self.mem_limit {
+            options = options.gpu_mem_limit(limit);
+        }
+        for (key, value) in &self.extra {
+            options = options.with_raw_unchecked(key.clone(), value.clone());
+        }
+        options
+    }
+
+    #[cfg(feature = "cuda")]
+    fn stream(&self) -> Option<&Arc<crate::CudaStream>> {
+        self.stream.as_ref()
+    }
+}
+
+impl Default for CudaConfig {
+    fn default() -> Self {
+        Self::performance(0)
+    }
+}
+
+impl From<&CudaConfig> for CudaProviderOptions {
+    fn from(config: &CudaConfig) -> Self {
+        config.provider_options()
+    }
+}
+
+impl From<CudaConfig> for CudaProviderOptions {
+    fn from(config: CudaConfig) -> Self {
+        config.provider_options()
+    }
+}
+
+fn is_reserved_cuda_key(key: &str) -> bool {
+    matches!(
+        key,
+        "device_id"
+            | "arena_extend_strategy"
+            | "cudnn_conv_algo_search"
+            | "use_tf32"
+            | "enable_cuda_graph"
+            | "enable_skip_layer_norm_strict_mode"
+            | "do_copy_in_default_stream"
+            | "use_ep_level_unified_stream"
+            | "gpu_mem_limit"
+            | "cudnn_conv_use_max_workspace"
+            | "prefer_nhwc"
+            | "user_compute_stream"
+            | "gpu_external_alloc"
+            | "gpu_external_free"
+            | "gpu_external_empty_cache"
+    )
+}
+
+fn is_unsafe_cuda_pointer_key(key: &str) -> bool {
+    matches!(
+        key,
+        "user_compute_stream"
+            | "gpu_external_alloc"
+            | "gpu_external_free"
+            | "gpu_external_empty_cache"
+    )
+}
+
+fn upsert_string_entry(entries: &mut Vec<(String, String)>, key: String, value: String) {
+    if let Some((_, existing)) = entries.iter_mut().find(|(candidate, _)| candidate == &key) {
+        *existing = value;
+    } else {
+        entries.push((key, value));
+    }
+}
+
 /// Pure-value CUDA execution-provider configuration.
 ///
-/// This covers ORT CUDA provider string options, plus runtime-only pointer options such as
-/// `user_compute_stream`. Unknown future string options can be supplied with
-/// [`Self::with_raw`].
+/// This covers ORT CUDA provider string options. Unknown future non-pointer options can be supplied
+/// with [`Self::with_raw`]. Process-local stream and allocator callback pointers are rejected;
+/// configure owned streams through [`CudaConfig`] or use [`CudaOptions::update_with_value`] only in
+/// an explicitly unsafe low-level integration.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CudaProviderOptions {
     entries: Vec<(String, String)>,
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pointer_entries: Vec<(String, usize)>,
 }
 
 impl CudaProviderOptions {
@@ -136,45 +373,29 @@ impl CudaProviderOptions {
         Self::default()
     }
 
-    pub fn from_preset(preset: CudaPreset) -> Self {
-        match preset {
-            CudaPreset::Performance { device_id } => Self::new()
-                .device_id(device_id)
-                .arena_extend_strategy(CudaArenaExtendStrategy::NextPowerOfTwo)
-                .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Exhaustive)
-                .do_copy_in_default_stream(true)
-                .use_tf32(true),
-            CudaPreset::CudaGraph { device_id } => Self::new()
-                .device_id(device_id)
-                .arena_extend_strategy(CudaArenaExtendStrategy::NextPowerOfTwo)
-                .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Exhaustive)
-                .do_copy_in_default_stream(true)
-                .enable_cuda_graph(true)
-                .use_tf32(true),
-            CudaPreset::LowMemory {
-                device_id,
-                gpu_mem_limit,
-            } => Self::new()
-                .device_id(device_id)
-                .gpu_mem_limit(gpu_mem_limit)
-                .arena_extend_strategy(CudaArenaExtendStrategy::SameAsRequested)
-                .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Heuristic)
-                .do_copy_in_default_stream(true)
-                .use_tf32(true),
-        }
-    }
-
     /// Add a raw CUDA provider key/value option.
     ///
-    /// Use this for ORT options added after this wrapper. Pointer-valued options should use
-    /// the dedicated pointer methods instead.
-    pub fn with_raw(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.entries.push((key.into(), value.into()));
+    /// Use this for non-pointer ORT options added after this wrapper. Process-local pointer options
+    /// are rejected.
+    pub fn with_raw(mut self, key: impl Into<String>, value: impl Into<String>) -> Result<Self> {
+        let key = key.into();
+        if is_unsafe_cuda_pointer_key(&key) {
+            return Err(crate::Error::new(
+                -1,
+                "pointer-valued CUDA options require an explicitly unsafe low-level API",
+            ));
+        }
+        upsert_string_entry(&mut self.entries, key, value.into());
+        Ok(self)
+    }
+
+    fn with_raw_unchecked(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        upsert_string_entry(&mut self.entries, key.into(), value.into());
         self
     }
 
     pub fn device_id(self, device_id: i32) -> Self {
-        self.with_raw("device_id", device_id.to_string())
+        self.with_raw_unchecked("device_id", device_id.to_string())
     }
 
     pub fn do_copy_in_default_stream(self, enabled: bool) -> Self {
@@ -186,15 +407,15 @@ impl CudaProviderOptions {
     }
 
     pub fn gpu_mem_limit(self, bytes: usize) -> Self {
-        self.with_raw("gpu_mem_limit", bytes.to_string())
+        self.with_raw_unchecked("gpu_mem_limit", bytes.to_string())
     }
 
     pub fn arena_extend_strategy(self, strategy: CudaArenaExtendStrategy) -> Self {
-        self.with_raw("arena_extend_strategy", strategy.as_ort_value())
+        self.with_raw_unchecked("arena_extend_strategy", strategy.as_ort_value())
     }
 
     pub fn cudnn_conv_algo_search(self, search: CudaCudnnConvAlgoSearch) -> Self {
-        self.with_raw("cudnn_conv_algo_search", search.as_ort_value())
+        self.with_raw_unchecked("cudnn_conv_algo_search", search.as_ort_value())
     }
 
     pub fn cudnn_conv_use_max_workspace(self, enabled: bool) -> Self {
@@ -230,40 +451,7 @@ impl CudaProviderOptions {
     }
 
     pub fn tunable_op_max_tuning_duration_ms(self, duration_ms: i32) -> Self {
-        self.with_raw("tunable_op_max_tuning_duration_ms", duration_ms.to_string())
-    }
-
-    pub fn gpu_external_alloc_address(self, address: usize) -> Self {
-        self.with_raw("gpu_external_alloc", address.to_string())
-    }
-
-    pub fn gpu_external_free_address(self, address: usize) -> Self {
-        self.with_raw("gpu_external_free", address.to_string())
-    }
-
-    pub fn gpu_external_empty_cache_address(self, address: usize) -> Self {
-        self.with_raw("gpu_external_empty_cache", address.to_string())
-    }
-
-    pub fn external_allocator_addresses(
-        self, alloc: usize, free: usize, empty_cache: usize,
-    ) -> Self {
-        self.gpu_external_alloc_address(alloc)
-            .gpu_external_free_address(free)
-            .gpu_external_empty_cache_address(empty_cache)
-    }
-
-    /// Set ORT's pointer-valued `user_compute_stream` option.
-    ///
-    /// # Safety
-    ///
-    /// `stream` must be a valid CUDA stream pointer for the target device and must remain valid
-    /// for the lifetime required by the ORT session. This option cannot be represented as a
-    /// string through ORT's C API.
-    pub unsafe fn user_compute_stream(mut self, stream: *mut c_void) -> Self {
-        self.pointer_entries
-            .push(("user_compute_stream".to_owned(), stream as usize));
-        self
+        self.with_raw_unchecked("tunable_op_max_tuning_duration_ms", duration_ms.to_string())
     }
 
     #[inline]
@@ -271,13 +459,8 @@ impl CudaProviderOptions {
         &self.entries
     }
 
-    #[inline]
-    pub fn pointer_entries(&self) -> &[(String, usize)] {
-        &self.pointer_entries
-    }
-
     fn with_bool(self, key: &'static str, enabled: bool) -> Self {
-        self.with_raw(key, if enabled { "1" } else { "0" })
+        self.with_raw_unchecked(key, if enabled { "1" } else { "0" })
     }
 
     fn entry_refs(entries: &[(String, String)]) -> Vec<(&str, &str)> {
@@ -296,8 +479,11 @@ pub(crate) struct EpConfig {
     provider: EpProvider,
     #[cfg_attr(feature = "serde", serde(with = "crate::serde_support::kv_pairs"))]
     entries: Vec<(CString, CString)>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    requires_owned_cuda_stream: bool,
+    #[cfg(feature = "cuda")]
     #[cfg_attr(feature = "serde", serde(skip))]
-    pointer_entries: Vec<(CString, usize)>,
+    cuda_stream: Option<Arc<crate::CudaStream>>,
 }
 
 /// Generate an EP options type for one provider:
@@ -378,27 +564,20 @@ ep_options!(
 );
 
 impl CudaOptions {
-    /// Create CUDA provider options from a built-in preset.
-    pub fn from_preset(preset: CudaPreset) -> Result<Self> {
-        Self::from_config(&CudaProviderOptions::from_preset(preset))
-    }
-
-    /// Create CUDA provider options from a pure-value CUDA config.
+    /// Create a live ORT CUDA options handle from the raw string escape hatch.
     pub fn from_config(config: &CudaProviderOptions) -> Result<Self> {
-        let refs = CudaProviderOptions::entry_refs(config.entries());
-        let options = Self::new(&refs)?;
-        for (key, value) in config.pointer_entries() {
-            let key = CString::new(key.as_str())
-                .map_err(|_| crate::Error::new(-1, "ep option key contains a NUL byte"))?;
-            check(unsafe {
-                api().update_cuda_provider_options_with_value()(
-                    options.0,
-                    key.as_ptr(),
-                    *value as *mut c_void,
-                )
-            })?;
+        if config
+            .entries()
+            .iter()
+            .any(|(key, _)| is_unsafe_cuda_pointer_key(key))
+        {
+            return Err(crate::Error::new(
+                -1,
+                "pointer-valued CUDA options require update_with_value in an unsafe low-level path",
+            ));
         }
-        Ok(options)
+        let refs = CudaProviderOptions::entry_refs(config.entries());
+        Self::new(&refs)
     }
 
     /// Update a pointer-valued CUDA provider option on this live ORT options handle.
@@ -484,15 +663,12 @@ pub(crate) fn apply(opts: *mut sys::SessionOptionsHandle, cfg: &EpConfig) -> Res
         .map_err(|_| crate::Error::new(-1, "ep option entry is not UTF-8"))?;
     match cfg.provider {
         EpProvider::Cuda => {
-            let options = CudaOptions::new(&entries)?;
-            for (key, value) in &cfg.pointer_entries {
-                check(unsafe {
-                    api().update_cuda_provider_options_with_value()(
-                        options.0,
-                        key.as_ptr(),
-                        *value as *mut c_void,
-                    )
-                })?;
+            #[allow(unused_mut)]
+            let mut options = CudaOptions::new(&entries)?;
+            #[cfg(feature = "cuda")]
+            if let Some(stream) = &cfg.cuda_stream {
+                // The EpConfig and resulting SessionInner retain this Arc through native teardown.
+                unsafe { options.update_with_value("user_compute_stream", stream.as_ptr())? };
             }
             options.append_raw(opts)
         },
@@ -807,6 +983,16 @@ impl SessionOptions {
     pub fn with_execution_provider(
         mut self, provider: EpProvider, entries: &[(&str, &str)],
     ) -> Result<Self> {
+        if provider == EpProvider::Cuda
+            && entries
+                .iter()
+                .any(|(key, _)| is_unsafe_cuda_pointer_key(key))
+        {
+            return Err(crate::Error::new(
+                -1,
+                "pointer-valued CUDA options require an explicitly unsafe low-level API",
+            ));
+        }
         let kv: Vec<(CString, CString)> = entries
             .iter()
             .map(|(k, v)| Ok((CString::new(*k)?, CString::new(*v)?)))
@@ -815,36 +1001,105 @@ impl SessionOptions {
         self.ep_configs.push(EpConfig {
             provider,
             entries: kv,
-            pointer_entries: Vec::new(),
+            requires_owned_cuda_stream: false,
+            #[cfg(feature = "cuda")]
+            cuda_stream: None,
         });
         Ok(self)
     }
 
     /// Queue a typed CUDA execution-provider configuration.
-    pub fn with_cuda_options(mut self, options: CudaProviderOptions) -> Result<Self> {
+    ///
+    /// User-stream configurations retain an `Arc<CudaStream>` in both `SessionOptions` and the
+    /// resulting `SessionInner`, so ORT cannot outlive the stream pointer it stores.
+    pub fn with_cuda(mut self, config: CudaConfig) -> Result<Self> {
+        for (key, _) in &config.extra {
+            if is_reserved_cuda_key(key) {
+                return Err(crate::Error::new(
+                    -1,
+                    format!("serialized CUDA config illegally overrides typed option {key:?}"),
+                ));
+            }
+        }
+        if config.device_inputs == DeviceInputPolicy::UserStream {
+            #[cfg(not(feature = "cuda"))]
+            return Err(crate::Error::new(
+                -1,
+                "CUDA user-stream configuration requires the `cuda` feature",
+            ));
+            #[cfg(feature = "cuda")]
+            match config.stream() {
+                None => {
+                    return Err(crate::Error::new(
+                        -1,
+                        "CUDA user-stream configuration is missing its owned stream",
+                    ));
+                },
+                Some(stream) if stream.device_id() != config.device_id => {
+                    return Err(crate::Error::new(
+                        -1,
+                        "CUDA user stream belongs to a different device",
+                    ));
+                },
+                Some(_) => {},
+            }
+        }
+        let options = config.provider_options();
         let entries: Vec<(CString, CString)> = options
             .entries
             .into_iter()
-            .map(|(k, v)| Ok((CString::new(k)?, CString::new(v)?)))
+            .map(|(key, value)| Ok((CString::new(key)?, CString::new(value)?)))
             .collect::<std::result::Result<_, std::ffi::NulError>>()
             .map_err(|_| crate::Error::new(-1, "cuda ep option key/value contains a NUL byte"))?;
-        let pointer_entries: Vec<(CString, usize)> = options
-            .pointer_entries
-            .into_iter()
-            .map(|(k, v)| Ok((CString::new(k)?, v)))
-            .collect::<std::result::Result<_, std::ffi::NulError>>()
-            .map_err(|_| crate::Error::new(-1, "cuda ep option key contains a NUL byte"))?;
         self.ep_configs.push(EpConfig {
             provider: EpProvider::Cuda,
             entries,
-            pointer_entries,
+            requires_owned_cuda_stream: config.device_inputs == DeviceInputPolicy::UserStream,
+            #[cfg(feature = "cuda")]
+            cuda_stream: config.stream,
         });
         Ok(self)
     }
 
-    /// Queue a built-in CUDA preset.
-    pub fn with_cuda_preset(self, preset: CudaPreset) -> Result<Self> {
-        self.with_cuda_options(CudaProviderOptions::from_preset(preset))
+    #[cfg(feature = "cuda")]
+    pub(crate) fn cuda_stream_guards(&self) -> Vec<Arc<crate::CudaStream>> {
+        self.ep_configs
+            .iter()
+            .filter_map(|config| config.cuda_stream.as_ref().map(Arc::clone))
+            .collect()
+    }
+
+    pub(crate) fn validate_cuda_stream_guards(&self) -> Result<()> {
+        for config in &self.ep_configs {
+            if config.provider == EpProvider::Cuda {
+                for (key, _) in &config.entries {
+                    let key = key
+                        .to_str()
+                        .map_err(|_| crate::Error::new(-1, "CUDA option key is not valid UTF-8"))?;
+                    if is_unsafe_cuda_pointer_key(key) {
+                        return Err(crate::Error::new(
+                            -1,
+                            "serialized CUDA configuration contains an unsafe pointer option",
+                        ));
+                    }
+                }
+            }
+            if config.requires_owned_cuda_stream {
+                #[cfg(not(feature = "cuda"))]
+                return Err(crate::Error::new(
+                    -1,
+                    "serialized CUDA user-stream configuration requires reattaching an owned stream",
+                ));
+                #[cfg(feature = "cuda")]
+                if config.cuda_stream.is_none() {
+                    return Err(crate::Error::new(
+                        -1,
+                        "serialized CUDA user-stream configuration requires reattaching an owned stream",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Queue the MIGraphX execution provider (AMD ROCm graph EP). MIGraphX takes a flat config
@@ -866,8 +1121,9 @@ impl SessionOptions {
     /// Queue one or more discovered [`crate::EpDevice`]s (all from the same EP) for attach at
     /// session creation (`SessionOptionsAppendExecutionProvider_V2`). Obtain devices via
     /// [`crate::get_ep_devices`]; `options` are optional key/value config. The devices are
-    /// borrowed — the [`crate::Environment`] they came from must outlive every session built
-    /// from these options (an ORT invariant). A capable device is required only to *run*.
+    /// retained together with their originating [`crate::Environment`] guard. Session creation rejects
+    /// using these options with a different environment before entering ORT. A capable device is
+    /// required only to *run*.
     pub fn append_execution_provider_device(
         mut self, devices: &[&crate::EpDevice], options: &[(&str, &str)],
     ) -> Result<Self> {
@@ -876,10 +1132,65 @@ impl SessionOptions {
             .map(|(k, v)| Ok((CString::new(*k)?, CString::new(*v)?)))
             .collect::<std::result::Result<_, std::ffi::NulError>>()
             .map_err(|_| crate::Error::new(-1, "ep device option key/value contains a NUL byte"))?;
+        let first = devices.first().ok_or_else(|| {
+            crate::Error::new(-1, "at least one execution-provider device is required")
+        })?;
+        let env = first.env_guard();
+        if devices
+            .iter()
+            .any(|device| !Arc::ptr_eq(&env, &device.env_guard()))
+        {
+            return Err(crate::Error::new(
+                -1,
+                "execution-provider devices must belong to the same Environment",
+            ));
+        }
+        let ep_name = first.ep_name()?;
+        for device in devices.iter().skip(1) {
+            if device.ep_name()? != ep_name {
+                return Err(crate::Error::new(
+                    -1,
+                    "execution-provider devices must belong to the same execution provider",
+                ));
+            }
+        }
         self.ep_device_attach
             .push(crate::ep_device::EpDeviceAttach {
                 devices: devices.iter().map(|d| d.as_ptr()).collect(),
                 options: opts,
+                env: Some(env),
+            });
+        Ok(self)
+    }
+
+    /// Queue an **author-created** [`crate::OwnedEpDevice`] for attach at session creation
+    /// (`SessionOptionsAppendExecutionProvider_V2`) — the in-process counterpart of
+    /// [`Self::append_execution_provider_device`]. That method borrows devices the engine
+    /// *discovered* via [`crate::get_ep_devices`]; this one takes a device you *authored* yourself
+    /// via [`crate::OwnedEpDevice::new`] (feature `model-editor`).
+    ///
+    /// `options` are optional key/value config forwarded to the V2 call.
+    ///
+    /// # Safety
+    ///
+    /// `ep_device`, its [`crate::OwnedHardwareDevice`], and the leaked
+    /// [`crate::EpFactoryInstance`] backing it must outlive every session built from these options.
+    /// The authoring handles are not shared owners, so this lifetime cannot currently be encoded.
+    /// ORT calls the factory during session initialization and teardown through retained pointers.
+    #[cfg(feature = "model-editor")]
+    pub unsafe fn append_ep_device(
+        mut self, ep_device: &crate::OwnedEpDevice, options: &[(&str, &str)],
+    ) -> Result<Self> {
+        let opts: Vec<(CString, CString)> = options
+            .iter()
+            .map(|(k, v)| Ok((CString::new(*k)?, CString::new(*v)?)))
+            .collect::<std::result::Result<_, std::ffi::NulError>>()
+            .map_err(|_| crate::Error::new(-1, "ep device option key/value contains a NUL byte"))?;
+        self.ep_device_attach
+            .push(crate::ep_device::EpDeviceAttach {
+                devices: vec![ep_device.as_ptr()],
+                options: opts,
+                env: None,
             });
         Ok(self)
     }
@@ -911,60 +1222,72 @@ mod tests {
     }
 
     #[test]
-    fn cuda_provider_options_cover_ort_keys() {
-        let options = unsafe {
-            CudaProviderOptions::new()
-                .device_id(2)
-                .do_copy_in_default_stream(false)
-                .use_ep_level_unified_stream(true)
-                .gpu_mem_limit(1024)
-                .arena_extend_strategy(CudaArenaExtendStrategy::SameAsRequested)
-                .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Default)
-                .cudnn_conv_use_max_workspace(true)
-                .cudnn_conv1d_pad_to_nc1d(true)
-                .enable_cuda_graph(true)
-                .enable_skip_layer_norm_strict_mode(true)
-                .use_tf32(false)
-                .prefer_nhwc(true)
-                .tunable_op_enable(true)
-                .tunable_op_tuning_enable(true)
-                .tunable_op_max_tuning_duration_ms(25)
-                .external_allocator_addresses(11, 12, 13)
-                .with_raw("future_cuda_option", "x")
-                .user_compute_stream(0x1234usize as *mut c_void)
-        };
+    fn cuda_provider_options_and_typed_config_cover_ort_keys() {
+        let options = CudaProviderOptions::new()
+            .device_id(2)
+            .do_copy_in_default_stream(false)
+            .use_ep_level_unified_stream(true)
+            .gpu_mem_limit(1024)
+            .arena_extend_strategy(CudaArenaExtendStrategy::SameAsRequested)
+            .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Default)
+            .cudnn_conv_use_max_workspace(true)
+            .cudnn_conv1d_pad_to_nc1d(true)
+            .enable_cuda_graph(true)
+            .enable_skip_layer_norm_strict_mode(true)
+            .use_tf32(false)
+            .prefer_nhwc(true)
+            .tunable_op_enable(true)
+            .tunable_op_tuning_enable(true)
+            .tunable_op_max_tuning_duration_ms(25)
+            .with_raw("future_cuda_option", "x")
+            .expect("future string option");
+
         let entries = options.entries();
         let has = |key: &str, value: &str| entries.iter().any(|(k, v)| k == key && v == value);
         assert!(has("device_id", "2"));
         assert!(has("do_copy_in_default_stream", "0"));
         assert!(has("use_ep_level_unified_stream", "1"));
         assert!(has("gpu_mem_limit", "1024"));
-        assert!(has("arena_extend_strategy", "kSameAsRequested"));
-        assert!(has("cudnn_conv_algo_search", "DEFAULT"));
-        assert!(has("cudnn_conv_use_max_workspace", "1"));
-        assert!(has("cudnn_conv1d_pad_to_nc1d", "1"));
-        assert!(has("enable_cuda_graph", "1"));
-        assert!(has("enable_skip_layer_norm_strict_mode", "1"));
-        assert!(has("use_tf32", "0"));
-        assert!(has("prefer_nhwc", "1"));
-        assert!(has("tunable_op_enable", "1"));
-        assert!(has("tunable_op_tuning_enable", "1"));
-        assert!(has("tunable_op_max_tuning_duration_ms", "25"));
-        assert!(has("gpu_external_alloc", "11"));
-        assert!(has("gpu_external_free", "12"));
-        assert!(has("gpu_external_empty_cache", "13"));
         assert!(has("future_cuda_option", "x"));
-        assert_eq!(
-            options.pointer_entries(),
-            &[("user_compute_stream".to_owned(), 0x1234)]
-        );
 
-        let low_mem = CudaProviderOptions::from_preset(CudaPreset::low_memory(2, 1024));
+        let low_mem = CudaProviderOptions::from(CudaConfig::low_memory(2, 1024));
         assert!(
             low_mem
                 .entries()
                 .iter()
-                .any(|(k, v)| k == "arena_extend_strategy" && v == "kSameAsRequested")
+                .any(|(key, value)| key == "arena_extend_strategy" && value == "kSameAsRequested")
+        );
+        let unified = CudaProviderOptions::from(
+            CudaConfig::performance(0)
+                .with_device_input_policy(DeviceInputPolicy::UnifiedStream)
+                .expect("unified"),
+        );
+        assert!(
+            unified
+                .entries()
+                .iter()
+                .any(|(key, value)| key == "do_copy_in_default_stream" && value == "1")
+        );
+        assert!(
+            unified
+                .entries()
+                .iter()
+                .any(|(key, value)| key == "use_ep_level_unified_stream" && value == "1")
+        );
+        assert!(
+            CudaConfig::performance(0)
+                .with_raw("user_compute_stream", "1234")
+                .is_err()
+        );
+        assert!(
+            CudaProviderOptions::new()
+                .with_raw("user_compute_stream", "1234")
+                .is_err()
+        );
+        assert!(
+            SessionOptions::new()
+                .with_execution_provider(EpProvider::Cuda, &[("user_compute_stream", "1234")],)
+                .is_err()
         );
     }
 
@@ -980,7 +1303,9 @@ mod tests {
             let cfg = EpConfig {
                 provider,
                 entries: Vec::new(),
-                pointer_entries: Vec::new(),
+                requires_owned_cuda_stream: false,
+                #[cfg(feature = "cuda")]
+                cuda_stream: None,
             };
             let res = apply(h, &cfg);
             eprintln!("{provider:?} apply -> {res:?}");
@@ -1128,7 +1453,9 @@ mod serde_tests {
                     CString::new("kSameAsRequested").unwrap(),
                 ),
             ],
-            pointer_entries: Vec::new(),
+            requires_owned_cuda_stream: false,
+            #[cfg(feature = "cuda")]
+            cuda_stream: None,
         };
         let json = serde_json::to_string(&cfg).expect("serialize");
         eprintln!("EpConfig JSON: {json}");
@@ -1138,6 +1465,38 @@ mod serde_tests {
         assert_eq!(back.entries.len(), 2);
         assert_eq!(back.entries[0].0.to_str().unwrap(), "device_id");
         assert_eq!(back.entries[1].1.to_str().unwrap(), "kSameAsRequested");
+    }
+
+    #[test]
+    fn serialized_user_stream_marker_requires_reattachment() {
+        let cfg = EpConfig {
+            provider: EpProvider::Cuda,
+            entries: vec![(
+                CString::new("device_id").unwrap(),
+                CString::new("0").unwrap(),
+            )],
+            requires_owned_cuda_stream: true,
+            #[cfg(feature = "cuda")]
+            cuda_stream: None,
+        };
+        let json = serde_json::to_string(&cfg).expect("serialize");
+        let back: EpConfig = serde_json::from_str(&json).expect("deserialize");
+        let mut options = SessionOptions::new();
+        options.ep_configs.push(back);
+        let error = options
+            .validate_cuda_stream_guards()
+            .expect_err("missing owned stream must fail");
+        assert!(error.message.contains("requires reattaching"));
+    }
+
+    #[test]
+    fn deserialized_raw_cuda_pointer_option_is_rejected() {
+        let json = r#"{"entries":[["user_compute_stream","1234"]]}"#;
+        let config: CudaProviderOptions = serde_json::from_str(json).expect("deserialize config");
+        let error = CudaOptions::from_config(&config)
+            .err()
+            .expect("safe materialization must reject raw pointers");
+        assert!(error.message.contains("pointer-valued CUDA options"));
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use st_zrt::{
-    Environment, GraphOptimizationLevel, LaneBufferPolicy, MemoryInfo, Session, SessionOptions,
+    BufferSpec, Environment, GraphOptimizationLevel, MemoryInfo, Session, SessionOptions,
 };
 use st_zrt_bench_c::models;
 
@@ -63,7 +63,7 @@ fn session(env: &Environment, path: &str) -> st_zrt::Result<Session> {
     Session::new(env, path, opts)
 }
 
-fn lane_policy() -> LaneBufferPolicy {
+fn lane_policy() -> BufferSpec {
     let alignment = std::env::var("ZRT_LANE_ALIGNMENT")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -72,21 +72,21 @@ fn lane_policy() -> LaneBufferPolicy {
         .unwrap_or_else(|_| "auto".to_string())
         .as_str()
     {
-        "vec" => LaneBufferPolicy::Vec,
-        "prefaulted" => LaneBufferPolicy::Prefaulted,
-        "aligned" => LaneBufferPolicy::Aligned { alignment },
-        "aligned-prefaulted" => LaneBufferPolicy::AlignedPrefaulted { alignment },
-        "hugepage" => LaneBufferPolicy::HugePage,
-        "hugepage-prefaulted" => LaneBufferPolicy::HugePagePrefaulted,
-        "aligned-hugepage-prefaulted" => LaneBufferPolicy::AlignedHugePagePrefaulted { alignment },
-        "aligned-mlocked" => LaneBufferPolicy::AlignedMlocked { alignment },
-        "aligned-mlocked-prefaulted" => LaneBufferPolicy::AlignedMlockedPrefaulted { alignment },
-        "hugepage-mlocked" => LaneBufferPolicy::HugePageMlocked,
-        "hugepage-mlocked-prefaulted" => LaneBufferPolicy::HugePageMlockedPrefaulted,
+        "vec" => BufferSpec::vec(),
+        "prefaulted" => BufferSpec::vec().prefault(),
+        "aligned" => BufferSpec::aligned(alignment),
+        "aligned-prefaulted" => BufferSpec::aligned(alignment).prefault(),
+        "hugepage" => BufferSpec::aligned(2 << 20).hugepage(),
+        "hugepage-prefaulted" => BufferSpec::THROUGHPUT_LARGE,
+        "aligned-hugepage-prefaulted" => BufferSpec::aligned(alignment).hugepage().prefault(),
+        "aligned-mlocked" => BufferSpec::aligned(alignment).mlock(),
+        "aligned-mlocked-prefaulted" => BufferSpec::aligned(alignment).mlock().prefault(),
+        "hugepage-mlocked" => BufferSpec::aligned(2 << 20).hugepage().mlock(),
+        "hugepage-mlocked-prefaulted" => BufferSpec::PINNED_HOST,
         "aligned-hugepage-mlocked-prefaulted" => {
-            LaneBufferPolicy::AlignedHugePageMlockedPrefaulted { alignment }
-        }
-        _ => LaneBufferPolicy::Auto,
+            BufferSpec::aligned(alignment).hugepage().mlock().prefault()
+        },
+        _ => BufferSpec::AUTO,
     }
 }
 
@@ -159,10 +159,7 @@ fn bench_mnist(warmups: usize, iters: usize, mode: &str) -> Result<Probe, Box<dy
 }
 
 fn bench_relay(
-    label: &str,
-    warmups: usize,
-    iters: usize,
-    mode: &str,
+    label: &str, warmups: usize, iters: usize, mode: &str,
 ) -> Result<Probe, Box<dyn Error>> {
     let n = match label {
         "relay4m" => 1usize << 20,
@@ -297,9 +294,7 @@ fn bench_resnet(warmups: usize, iters: usize, mode: &str) -> Result<Probe, Box<d
 }
 
 fn run_lane(
-    lane: &mut st_zrt::TensorIoLane<f32>,
-    warmups: usize,
-    iters: usize,
+    lane: &mut st_zrt::TensorIoLane<f32>, warmups: usize, iters: usize,
 ) -> st_zrt::Result<(Duration, Duration, f64)> {
     let warmup_start = Instant::now();
     for _ in 0..warmups {
@@ -320,9 +315,7 @@ fn run_lane(
 }
 
 fn run_allocated_lane(
-    lane: &mut st_zrt::AllocatedOutputTensorIoLane<f32>,
-    warmups: usize,
-    iters: usize,
+    lane: &mut st_zrt::AllocatedOutputTensorIoLane<f32>, warmups: usize, iters: usize,
 ) -> st_zrt::Result<(Duration, Duration, f64)> {
     let warmup_start = Instant::now();
     for _ in 0..warmups {
@@ -343,9 +336,7 @@ fn run_allocated_lane(
 }
 
 fn run_allocated_io_lane(
-    lane: &mut st_zrt::AllocatedTensorIoLane<f32>,
-    warmups: usize,
-    iters: usize,
+    lane: &mut st_zrt::AllocatedTensorIoLane<f32>, warmups: usize, iters: usize,
 ) -> st_zrt::Result<(Duration, Duration, f64)> {
     let warmup_start = Instant::now();
     for _ in 0..warmups {
@@ -366,9 +357,7 @@ fn run_allocated_io_lane(
 }
 
 fn run_device_output_lane(
-    lane: &mut st_zrt::DeviceOutputTensorIoLane<f32>,
-    warmups: usize,
-    iters: usize,
+    lane: &mut st_zrt::DeviceOutputTensorIoLane<f32>, warmups: usize, iters: usize,
 ) -> st_zrt::Result<(Duration, Duration, f64)> {
     let warmup_start = Instant::now();
     for _ in 0..warmups {
@@ -407,17 +396,9 @@ struct Probe {
 impl Probe {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        runtime: &'static str,
-        model: &str,
-        mode: &'static str,
-        warmups: usize,
-        iters: usize,
-        load_time: Duration,
-        warmup_time: Duration,
-        run_time: Duration,
-        start_rss: Rss,
-        loaded_rss: Rss,
-        checksum: f64,
+        runtime: &'static str, model: &str, mode: &'static str, warmups: usize, iters: usize,
+        load_time: Duration, warmup_time: Duration, run_time: Duration, start_rss: Rss,
+        loaded_rss: Rss, checksum: f64,
     ) -> Self {
         let done = rss().unwrap_or(loaded_rss);
         Self {

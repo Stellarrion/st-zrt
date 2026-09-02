@@ -17,7 +17,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::ffi::CString;
 
 /// (De)serialize `Option<CString>` as `Option<String>`.
-#[allow(dead_code)]
 pub mod opt_cstr {
     use super::*;
     pub fn serialize<S: Serializer>(c: &Option<CString>, s: S) -> Result<S::Ok, S::Error> {

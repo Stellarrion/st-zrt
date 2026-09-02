@@ -107,6 +107,27 @@ fn build_identity_fragment() -> Model {
 }
 
 #[test]
+fn finalize_requires_unique_session_inner_before_mutating_native_state() {
+    let env = Environment::new().expect("env");
+    let opts = SessionOptions::new().with_opt_level(GraphOptimizationLevel::All);
+    let source = build_add_model();
+    let bytes = source.to_bytes(&env, &opts).expect("serialize source");
+    let mut session =
+        Session::from_bytes_for_editing(&env, &bytes, opts.clone()).expect("editor session");
+
+    let clone = session.clone();
+    let err = session
+        .finalize(&opts)
+        .expect_err("finalize must reject shared mutable metadata");
+    assert!(err.to_string().contains("Session clones"));
+    drop(clone);
+
+    session
+        .finalize(&opts)
+        .expect("the rejected call must not have finalized native state");
+}
+
+#[test]
 fn apply_model_fragment_to_existing_output() {
     let env = Environment::new().expect("env");
     let mem = MemoryInfo::cpu().expect("cpu mem");

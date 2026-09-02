@@ -62,10 +62,10 @@ fn try_level(env: &st_zrt::Environment, model: &str, name: &str, level: GraphOpt
                 session.output_name(0).expect("output name"),
                 session.output_shape(0).expect("output shape")
             );
-        }
+        },
         Err(err) => {
             println!("ZRT {name:<10} FAIL {err}");
-        }
+        },
     }
 }
 
@@ -115,10 +115,10 @@ fn try_raw_create(model: &str, name: &str, level: GraphOptimizationLevel) {
             Ok(()) => {
                 println!("ZRT raw {name:<10} OK");
                 api.release_session()(session);
-            }
+            },
             Err(err) => {
                 println!("ZRT raw {name:<10} FAIL CreateSession {err}");
-            }
+            },
         }
 
         api.release_session_options()(opts);

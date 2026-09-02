@@ -1,4 +1,4 @@
-//! st-zrt-sys codegen — emits `st-zrt-sys/src/generated/api.rs` from the ORT C header.
+//! st-zrt-sys codegen — emits `st-zrt-sys/src/generated.rs` from the ORT C header.
 //!
 //! NOT bindgen: we run `gcc -E -P` to fully expand `struct OrtApi` (bindgen can't — the
 //! function-pointer table is macro-defined), then parse the now-regular fields and map
@@ -7,6 +7,9 @@
 //!
 //!   cargo run -p st-zrt-sys-codegen -- \<header\> \<out.rs\>
 //!   cargo run -p st-zrt-sys-codegen -- \<header\> \<out.rs\> --preprocessed \<pp.c\>
+//!
+//! `scripts/check-generated-bindings.sh` is the canonical reproducibility check: it regenerates,
+//! formats, and compares the output against the checked-in API 27 bindings.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -40,14 +43,27 @@ fn main() {
     let mut a = args;
     while let Some(flag) = a.next() {
         if flag == "--preprocessed" {
+            assert!(
+                preprocessed.is_none(),
+                "--preprocessed may be supplied only once"
+            );
             preprocessed = Some(a.next().expect("--preprocessed needs a path").into());
+        } else {
+            panic!(
+                "unknown argument {flag:?}; usage: codegen <header> <out.rs> [--preprocessed <pp.c>]"
+            );
         }
     }
 
-    let pp = match preprocessed {
+    let mut pp = match preprocessed {
         Some(p) => std::fs::read_to_string(&p).expect("read preprocessed"),
         None => preprocess(&header),
     };
+    // Pre-C23 toolchains expand stdbool's `bool` macro to `_Bool` in the preprocessed
+    // output while C23 toolchains keep the `bool` keyword. Normalize to `bool` so the
+    // parsed signatures, the emitted doc comments, and the type mapping are identical
+    // regardless of the compiler that produced the text.
+    pp = pp.replace("_Bool", "bool");
     let fields = parse_api_struct(&pp, "OrtApi");
     if fields.is_empty() {
         panic!("codegen: no OrtApi fields parsed — header layout changed?");
@@ -84,7 +100,7 @@ fn main() {
 
 fn preprocess(header: &std::path::Path) -> String {
     let out = Command::new("gcc")
-        .args(["-E", "-P"])
+        .args(["-E", "-P", "-Wno-pragma-once-outside-header"])
         .arg(header)
         .stderr(Stdio::inherit())
         .output()
@@ -426,6 +442,8 @@ fn map_base(b: &str) -> String {
         "float" => "f32".into(),
         "double" => "f64".into(),
         "bool" => "bool".into(),
+        // Belt and braces: normalized above, but map it directly if it ever slips through.
+        "_Bool" => "bool".into(),
         // ORT status: the typedef (no star) maps to StatusPtr; the bare type (with a
         // star, e.g. OrtStatus*) maps to the handle so the pointer level is added once.
         "OrtStatusPtr" => "StatusPtr".into(),
@@ -441,6 +459,11 @@ fn map_base(b: &str) -> String {
         // enums we model in lib.rs
         "OrtAllocatorType" => "AllocatorType".into(),
         "OrtMemType" => "MemType".into(),
+        // OrtProfilingEventCategory lives in onnxruntime_ep_c_api.h but is `#include`d into the
+        // preprocessed header, so the codegen sees it. It is a plain int enum (Session/Node/Kernel/Api),
+        // not an opaque struct — model it in lib.rs alongside MemType (otherwise it falls through to
+        // the opaque default and CreateProfilingEvent's category param becomes unconstructible).
+        "OrtProfilingEventCategory" => "ProfilingEventCategory".into(),
         "OrtLoggingLevel" => "LoggingLevel".into(),
         "OrtExecutionProviderDevicePolicy" => "ExecutionProviderDevicePolicy".into(),
         "GraphOptimizationLevel" => "GraphOptimizationLevel".into(),
@@ -448,6 +471,9 @@ fn map_base(b: &str) -> String {
         "ONNXType" => "OnnxType".into(),
         "OrtSparseFormat" => "SparseFormat".into(),
         "OrtSparseIndicesFormat" => "SparseIndicesFormat".into(),
+        // EP-authoring enums (onnxruntime_ep_c_api.h): plain int enums modelled in lib.rs.
+        "OrtEpDataLayout" => "EpDataLayout".into(),
+        "OrtGraphCaptureNodeAssignmentPolicy" => "GraphCaptureNodeAssignmentPolicy".into(),
         "ExecutionMode" => "ExecutionMode".into(),
         "OrtLanguageProjection" => "i32".into(),
         "OrtCompiledModelCompatibility"

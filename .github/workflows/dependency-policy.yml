@@ -1,0 +1,43 @@
+name: Dependency policy
+
+# Weekly dependency-policy/advisory sweep for every covered Cargo graph. This workflow
+# never tags, releases, or publishes anything; tag-bound release gates stay manual.
+
+on:
+  schedule:
+    # Weekly: Mondays 06:17 UTC (offset from the top of the hour to spread GitHub load).
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The action runs cargo-deny in its own pinned container, so it cannot be reused as
+      # a host binary by later steps. One invocation per Cargo graph, selected with the
+      # action's manifest-path input.
+      - name: cargo-deny (workspace graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+      - name: cargo-deny (bench graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: bench/Cargo.toml
+
+      - name: cargo-deny (bench-c graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: bench-c/Cargo.toml

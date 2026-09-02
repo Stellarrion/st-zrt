@@ -14,7 +14,7 @@ for model in $models; do
     modes="$mode"
   fi
   for one_mode in $modes; do
-    out=$(ZRT_BENCH_WARMUPS="$warmups" cargo run --quiet --release \
+    out=$(ZRT_BENCH_WARMUPS="$warmups" cargo run --locked --quiet --release \
       --manifest-path bench-c/Cargo.toml \
       --example mmap_initializer_probe -- "$model" "$one_mode" "$iters")
     if [[ "$first" == "1" ]]; then

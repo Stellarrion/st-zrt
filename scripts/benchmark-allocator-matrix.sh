@@ -18,7 +18,7 @@ for arena in default disabled; do
         row=$(ZRT_BENCH_WARMUPS="$warmups" \
           ZRT_DISABLE_ARENA="$disable_arena" \
           ZRT_DISABLE_MEM_PATTERN="$disable_mem_pattern" \
-          cargo run --quiet --release --manifest-path bench-c/Cargo.toml --example mem_probe -- "$model" "$iters" "$mode")
+          cargo run --locked --quiet --release --manifest-path bench-c/Cargo.toml --example mem_probe -- "$model" "$iters" "$mode")
         echo "$arena,$mem_pattern,$row"
       done
     done

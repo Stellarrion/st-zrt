@@ -5,10 +5,9 @@
 //!     /path/to/model_cuda.onnx [batch] [seq] [hidden]
 
 use st_zrt::{
-    CudaPreset, Environment, GraphOptimizationLevel, LoggingLevel, MemoryInfo, OwnedValue,
-    RunInput, Session, SessionOptions, StaticIoLane, Tensor,
+    CudaConfig, Environment, GraphOptimizationLevel, LoggingLevel, MemoryInfo, OwnedValue,
+    RunInput, ServingLane, Session, SessionOptions, Tensor,
 };
-use std::sync::Arc;
 
 fn main() -> st_zrt::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -36,8 +35,8 @@ fn main() -> st_zrt::Result<()> {
         .with_inter_threads(1)
         .with_config_entry("session.use_device_allocator_for_initializers", "1")
         .expect("config entry")
-        .with_cuda_preset(CudaPreset::performance(0))?;
-    let sess = Arc::new(Session::new(&env, &model, opts)?);
+        .with_cuda(CudaConfig::performance(0))?;
+    let sess = Session::new(&env, &model, opts)?;
 
     let mem = MemoryInfo::cpu()?;
     let len = batch * seq;
@@ -68,7 +67,7 @@ fn main() -> st_zrt::Result<()> {
         print_prefixes("session-run", output.as_slice::<f32>()?, batch, seq, hidden);
     }
 
-    let mut lane = StaticIoLane::<i64, f32, 3, 1>::new(
+    let mut lane = ServingLane::<i64, f32, 3, 1>::new(
         sess.clone(),
         &mem,
         [&shape, &shape, &shape],

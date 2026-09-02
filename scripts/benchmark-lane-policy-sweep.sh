@@ -12,12 +12,12 @@ for policy in $policies; do
   if [[ "$policy" == "aligned" || "$policy" == "aligned-prefaulted" || "$policy" == "aligned-hugepage-prefaulted" || "$policy" == "aligned-mlocked" || "$policy" == "aligned-mlocked-prefaulted" || "$policy" == "aligned-hugepage-mlocked-prefaulted" ]]; then
     for alignment in $alignments; do
       row=$(ZRT_BENCH_WARMUPS="$warmups" ZRT_LANE_POLICY="$policy" ZRT_LANE_ALIGNMENT="$alignment" \
-        cargo run --quiet --release --manifest-path bench-c/Cargo.toml --example mem_probe -- "$model" "$iters" lane)
+        cargo run --locked --quiet --release --manifest-path bench-c/Cargo.toml --example mem_probe -- "$model" "$iters" lane)
       echo "$policy,$alignment,$row"
     done
   else
     row=$(ZRT_BENCH_WARMUPS="$warmups" ZRT_LANE_POLICY="$policy" \
-      cargo run --quiet --release --manifest-path bench-c/Cargo.toml --example mem_probe -- "$model" "$iters" lane)
+      cargo run --locked --quiet --release --manifest-path bench-c/Cargo.toml --example mem_probe -- "$model" "$iters" lane)
     echo "$policy,,$row"
   fi
 done

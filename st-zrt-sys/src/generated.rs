@@ -64,7 +64,6 @@ opaque_handle!(OpSchemaTypeConstraintHandle);
 opaque_handle!(OpenVINOProviderOptionsHandle);
 opaque_handle!(OptionalTypeInfoHandle);
 opaque_handle!(PrepackedWeightsContainerHandle);
-opaque_handle!(ProfilingEventCategoryHandle);
 opaque_handle!(ProfilingEventHandle);
 opaque_handle!(ProfilingEventsContainerHandle);
 opaque_handle!(ROCMProviderOptionsHandle);
@@ -2560,6 +2559,16 @@ impl Api {
     }
 }
 
+// void( * ReleaseOpAttr)( OrtOpAttr * input)
+pub const IDX_RELEASE_OP_ATTR: usize = 212;
+pub type ReleaseOpAttrFn = unsafe extern "C" fn(input: *mut OpAttrHandle) -> ();
+impl Api {
+    #[inline]
+    pub unsafe fn release_op_attr(&self) -> ReleaseOpAttrFn {
+        unsafe { self.f(IDX_RELEASE_OP_ATTR) }
+    }
+}
+
 // OrtStatusPtr(* InvokeOp)( const OrtKernelContext* context, const OrtOp* ort_op, const OrtValue* const* input_values, int input_count, OrtValue* const* output_values, int output_count) __attribute__((warn_unused_result))
 pub const IDX_INVOKE_OP: usize = 214;
 pub type InvokeOpFn = unsafe extern "C" fn(
@@ -4902,16 +4911,6 @@ impl Api {
     }
 }
 
-// void( * ReleaseOpAttr)( OrtOpAttr * input)
-pub const IDX_RELEASE_OP_ATTR: usize = 212;
-pub type ReleaseOpAttrFn = unsafe extern "C" fn(input: *mut OpAttrHandle) -> ();
-impl Api {
-    #[inline]
-    pub unsafe fn release_op_attr(&self) -> ReleaseOpAttrFn {
-        unsafe { self.f(IDX_RELEASE_OP_ATTR) }
-    }
-}
-
 // OrtStatusPtr(* CreateOp)( const OrtKernelInfo* info, const char* op_name, const char* domain, int version, const char** type_constraint_names, const ONNXTensorElementDataType* type_constraint_values, int type_constraint_count, const OrtOpAttr* const* attr_values, int attr_count, int input_count, int output_count, OrtOp** ort_op) __attribute__((warn_unused_result))
 #[cfg(feature = "custom-ops")]
 pub const IDX_CREATE_OP: usize = 213;
@@ -6692,7 +6691,7 @@ pub struct EpApi {
     >,
     pub CreateProfilingEvent: Option<
         unsafe extern "C" fn(
-            category: ProfilingEventCategoryHandle,
+            category: ProfilingEventCategory,
             process_id: i32,
             thread_id: i32,
             event_name: *const core::ffi::c_char,
@@ -6708,7 +6707,7 @@ pub struct EpApi {
     pub ProfilingEvent_GetCategory: Option<
         unsafe extern "C" fn(
             event: *const ProfilingEventHandle,
-            out_: *mut ProfilingEventCategoryHandle,
+            out_: *mut ProfilingEventCategory,
         ) -> StatusPtr,
     >,
     pub ProfilingEvent_GetName: Option<

@@ -2,10 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
     tags: ["st-zrt-v*"]
   pull_request:
-    branches: [main]
+    branches: [main, "release/**"]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,37 +18,82 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
+  # ORT permits only one default LoggingManager per process.
+  RUST_TEST_THREADS: "1"
 
 jobs:
   rust:
+    # Native link/runtime coverage is Linux x86-64 (the reference platform): the tests
+    # download and link the pinned linux-x64 ORT archive on an ubuntu runner.
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # Toolchain selected via the `toolchain` input so this master pin stays Dependabot-updatable.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Format
         run: cargo fmt --check
 
-      - name: Clippy
-        run: cargo clippy -p st-zrt --all-targets -- -D warnings
+      - name: Dependency policy (workspace graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
-      - name: Test default feature set
-        run: cargo test -p st-zrt
+      - name: Clippy (workspace, all targets and features)
+        env:
+          DOCS_RS: "1"
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-      - name: Test serde session options
-        run: cargo test -p st-zrt --features serde session_options
+      - name: Tests (default features, native link)
+        run: |
+          cargo test -p st-zrt --locked
+          cargo test -p st-zrt-sys --locked
 
-      - name: Test model-editor graph augmentation
-        run: cargo test -p st-zrt --features model-editor apply_model_fragment_to_existing_output
+      - name: Check feature corners (no default features)
+        env:
+          DOCS_RS: "1"
+        run: |
+          cargo check -p st-zrt-sys --no-default-features --locked
+          cargo check -p st-zrt --no-default-features --locked
 
-      - name: Check extension feature surface
-        run: cargo check -p st-zrt --features model-editor,serde,ep,custom-ops
+      - name: Verify generated bindings
+        run: scripts/check-generated-bindings.sh
+
+      # Docs must build offline (the docs.rs path): DOCS_RS makes st-zrt-sys's build.rs skip
+      # the archive fetch/link, mirroring how docs.rs builds the published crate.
+      - name: Docs (all features, offline via DOCS_RS guard)
+        env:
+          DOCS_RS: "1"
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo doc --workspace --all-features --no-deps --locked
+
+  msrv:
+    # Verify the declared rust-version (1.85) floor — catches stable-only/2024 idioms that would
+    # silently raise the MSRV.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Immutable snapshot of dtolnay/rust-toolchain's 1.85.1 branch (2026-08-22). This is a
+      # branch pin, not a release tag — Dependabot does not track it and it carries no version
+      # marker on purpose; review when bumping MSRV.
+      - name: Install Rust 1.85.1
+        uses: dtolnay/rust-toolchain@85c23e28f7ccc75a9a153d45d385d94a85464876
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Check MSRV (workspace, all targets and features)
+        env:
+          # Compile the complete Rust surface without downloading/linking native ORT/CUDA on CI.
+          DOCS_RS: "1"
+        run: cargo check --workspace --all-targets --all-features --locked

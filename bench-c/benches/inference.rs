@@ -5,7 +5,7 @@
 //! wrapper path, `C_prepared` pre-builds the zero-copy input and reuses the output
 //! slots, and `C_1thread` pins intra-op threads to 1 (tiny models are often
 //! latency-bound by thread-pool scheduling rather than compute).
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{GraphOptimizationLevel, OutputValue, SessionOptions, Tensor};
 use st_zrt_bench_c::{models, variant_c};
 
@@ -109,7 +109,8 @@ fn bench_c_iobinding(c: &mut Criterion) {
     // view + a preallocated [1,10] output buffer are bound by name and reused — no per-run
     // name marshaling, no per-run input/output value allocation. On MNIST the output is
     // 40 bytes, so the E2 (no-output-alloc) win is negligible here; the large-output win
-    // is gated on a bigger model (see progress.md blocker #3).
+    // needs a bigger model and remains unmeasured (see docs/v0.3-benchmark-results.md
+    // for what has actually been characterized).
     let model = models::ensure_mnist().expect("mnist");
     let path = model.to_str().unwrap();
     let env = st_zrt::Environment::new().unwrap();

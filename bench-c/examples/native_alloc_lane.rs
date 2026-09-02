@@ -5,7 +5,8 @@
 //! the model, resets the counters, then runs only `TensorIoLane::run` in the measured loop.
 use st_zrt::{Allocator, Environment, GraphOptimizationLevel, MemoryInfo, SessionOptions};
 use st_zrt_bench_c::models;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_void};
+use std::time::Instant;
 
 #[link(name = "dl")]
 unsafe extern "C" {
@@ -107,16 +108,19 @@ fn main() {
 
     unsafe { (ctr.reset)() };
     let mut checksum = 0u64;
+    let start = Instant::now();
     for i in 0..iters {
         lane.run().unwrap();
         let out = lane.output(0).expect("lane output");
         checksum = checksum.wrapping_add(out[i % out.len()].to_bits() as u64);
     }
+    let elapsed = start.elapsed();
 
     let allocs = unsafe { (ctr.allocs)() };
     let frees = unsafe { (ctr.frees)() };
     let bytes = unsafe { (ctr.bytes)() };
+    let avg_us = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
     println!(
-        "native_alloc_lane label={label} iters={iters} allocs={allocs} frees={frees} bytes={bytes} checksum={checksum:#x}"
+        "native_alloc_lane label={label} mode=lane iters={iters} avg_us={avg_us:.3} allocs={allocs} frees={frees} bytes={bytes} checksum={checksum:#x}"
     );
 }

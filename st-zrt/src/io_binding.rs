@@ -4,14 +4,15 @@
 //! [`crate::TensorView`]: inputs are zero-copy views, and with IoBinding so are outputs.
 use crate::allocator::Allocator;
 use crate::element::TensorElement;
-use crate::memory::MemoryInfo;
-use crate::session::Session;
-use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer, tensor_memory_info};
+use crate::memory::{MemoryClass, MemoryInfo};
+use crate::session::{Session, SessionInner};
+use crate::tensor::{AllocatedTensor, OwnedValue, RunInput, TensorBuffer};
 use crate::type_info::checked_element_count;
 use crate::{Error, Result, api, check, sys};
 use std::ffi::{CStr, CString, c_void};
 use std::marker::PhantomData;
 use std::ptr;
+use std::sync::Arc;
 
 /// A caller-owned mutable buffer wrapped as an ORT value, for binding as a zero-copy
 /// output via [`IoBinding`]. Constructed with `CreateTensorWithDataAsOrtValue`; the engine
@@ -22,6 +23,8 @@ pub struct OutputValue<'a> {
     value: *mut sys::ValueHandle,
     elem_type: sys::ElementType,
     count: usize,
+    data: *mut c_void,
+    memory_class: MemoryClass,
     _life: PhantomData<&'a mut [u8]>,
 }
 
@@ -33,7 +36,7 @@ impl<'a> OutputValue<'a> {
         buf: &'a mut [T], shape: &[i64], mem: &MemoryInfo,
     ) -> Result<Self> {
         validate_shape_len(shape, buf.len())?;
-        if !mem.is_host_accessible()? {
+        if !mem.is_host_accessible() {
             let info = mem.snapshot()?;
             return Err(Error::new(
                 -1,
@@ -44,6 +47,7 @@ impl<'a> OutputValue<'a> {
             ));
         }
         let bytes = std::mem::size_of_val(buf);
+        let data = buf.as_mut_ptr() as *mut c_void;
         let mut value: *mut sys::ValueHandle = ptr::null_mut();
         check(unsafe {
             api().create_tensor_with_data_as_ort_value()(
@@ -61,6 +65,8 @@ impl<'a> OutputValue<'a> {
             value,
             elem_type: T::ELEM,
             count: buf.len(),
+            data,
+            memory_class: mem.class(),
             _life: PhantomData,
         })
     }
@@ -84,22 +90,59 @@ impl<'a> OutputValue<'a> {
                 ),
             ));
         }
-        let info = tensor_memory_info(self.value as *const sys::ValueHandle)?;
-        if !info.is_host_accessible() {
+        if !self.memory_class.is_host_accessible() {
             return Err(Error::new(
                 -1,
                 format!(
-                    "output tensor memory is not host-accessible: {} device {} ({:?}/{:?})",
-                    info.name, info.device_id, info.alloc_type, info.mem_type
+                    "output tensor memory class is not host-accessible: {:?}",
+                    self.memory_class
                 ),
             ));
         }
-        let mut data: *mut c_void = ptr::null_mut();
-        check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
-        let data = crate::slice_data_ptr(data as *mut T, self.count, "output tensor data")?;
-        // SAFETY: data points into the caller-owned buffer (ours), contiguous and aligned,
-        // holding `self.count` elements of T. Lives for at least 'a (the buffer's lifetime).
+        let data = crate::slice_data_ptr(self.data as *mut T, self.count, "output tensor data")?;
+        // SAFETY: `data` is the caller buffer pointer cached at construction. `OutputValue`'s
+        // exclusive lifetime marker keeps that buffer stable and borrowed for the value's life.
         Ok(unsafe { std::slice::from_raw_parts(data as *const T, self.count) })
+    }
+
+    /// Zero-copy mutable access to the cached caller-owned output buffer.
+    ///
+    /// Call this only when no run using the value is in flight. The exclusive `&mut self` prevents
+    /// simultaneous safe reads or writes through this wrapper.
+    pub fn as_mut_slice<T: TensorElement>(&mut self) -> Result<&mut [T]> {
+        if self.elem_type as i32 != T::ELEM as i32 {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: OutputValue::as_mut_slice<{}> on a {:?} buffer",
+                    std::any::type_name::<T>(),
+                    self.elem_type
+                ),
+            ));
+        }
+        if !self.memory_class.is_host_accessible() {
+            return Err(Error::new(
+                -1,
+                format!(
+                    "output tensor memory class is not host-accessible: {:?}",
+                    self.memory_class
+                ),
+            ));
+        }
+        let data = crate::slice_data_ptr(self.data as *mut T, self.count, "output tensor data")?;
+        Ok(unsafe { std::slice::from_raw_parts_mut(data, self.count) })
+    }
+}
+
+impl std::fmt::Debug for OutputValue<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OutputValue")
+            .field("value", &self.value)
+            .field("elem_type", &self.elem_type)
+            .field("count", &self.count)
+            .field("data", &self.data)
+            .field("memory_class", &self.memory_class)
+            .finish()
     }
 }
 
@@ -110,7 +153,6 @@ impl Drop for OutputValue<'_> {
     }
 }
 unsafe impl Send for OutputValue<'_> {}
-unsafe impl Sync for OutputValue<'_> {}
 
 fn validate_shape_len(shape: &[i64], len: usize) -> Result<()> {
     let expected = checked_element_count(shape)?;
@@ -128,6 +170,17 @@ fn validate_shape_len(shape: &[i64], len: usize) -> Result<()> {
 /// the binding once, mutate the input/output buffers between runs, and never rebind.
 pub struct IoBinding {
     binding: *mut sys::IoBindingHandle,
+    // ORT creates a binding for one specific session. Keep that session alive through
+    // `ReleaseIoBinding` and reject attempts to run the binding through another session.
+    session: Arc<SessionInner>,
+}
+
+impl std::fmt::Debug for IoBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IoBinding")
+            .field("binding", &self.binding)
+            .finish()
+    }
 }
 
 impl IoBinding {
@@ -136,7 +189,15 @@ impl IoBinding {
         let mut binding: *mut sys::IoBindingHandle = ptr::null_mut();
         check(unsafe { api().create_io_binding()(sess.as_ptr(), &mut binding) })?;
         let binding = crate::ensure_non_null(binding, "I/O binding")?;
-        Ok(Self { binding })
+        Ok(Self {
+            binding,
+            session: sess.share_inner(),
+        })
+    }
+
+    #[inline]
+    pub(crate) fn belongs_to(&self, session: &Session) -> bool {
+        session.shares_inner(&self.session)
     }
 
     #[inline]
@@ -249,6 +310,64 @@ impl IoBinding {
             (Ok(_), Err(err)) => Err(err),
         }
     }
+
+    /// The names of the outputs currently bound to this binding (`GetBoundOutputNames`, idx 139).
+    /// Returns the names in bind order. The engine allocates the string buffer and a parallel
+    /// lengths array via the default allocator; both are freed here (the names are copied into
+    /// Rust-owned `String`s).
+    pub fn output_names(&self) -> Result<Vec<String>> {
+        let alloc = Allocator::get_default()?;
+        let mut buffer: *mut core::ffi::c_char = ptr::null_mut();
+        let mut lengths: *mut usize = ptr::null_mut();
+        let mut count: usize = 0;
+        let status = check(unsafe {
+            api().get_bound_output_names()(
+                self.binding as *const sys::IoBindingHandle,
+                alloc.alloc,
+                &mut buffer,
+                &mut lengths,
+                &mut count,
+            )
+        });
+        let result = collect_bound_names(status, buffer, lengths, count);
+        // Free both engine-allocated arrays (best-effort); errors here are not actionable.
+        if !buffer.is_null() {
+            let _ = unsafe { alloc.free(buffer as *mut c_void) };
+        }
+        if !lengths.is_null() {
+            let _ = unsafe { alloc.free(lengths as *mut c_void) };
+        }
+        result
+    }
+}
+
+/// Copy the engine-allocated bound-output names into owned `String`s. The engine returns a single
+/// contiguous, **non-NUL-terminated** UTF-8 buffer plus a parallel `lengths` array (one length per
+/// name); name `i` spans `lengths[i]` bytes starting at the running offset. `status` is consumed
+/// so `?` short-circuits on an ORT error; the caller frees `buffer`/`lengths` regardless.
+fn collect_bound_names(
+    status: Result<()>, buffer: *mut core::ffi::c_char, lengths: *mut usize, count: usize,
+) -> Result<Vec<String>> {
+    status?;
+    let mut names = Vec::with_capacity(count);
+    if count != 0 && !buffer.is_null() && !lengths.is_null() {
+        let lens = unsafe { std::slice::from_raw_parts(lengths, count) };
+        let mut offset = 0usize;
+        for &n in lens {
+            let name = if n == 0 {
+                String::new()
+            } else {
+                let bytes =
+                    unsafe { std::slice::from_raw_parts(buffer.add(offset) as *const u8, n) };
+                std::str::from_utf8(bytes)
+                    .map(str::to_owned)
+                    .map_err(|_| Error::new(-1, "zrt: bound output name is not valid UTF-8"))?
+            };
+            names.push(name);
+            offset += n;
+        }
+    }
+    Ok(names)
 }
 
 impl Drop for IoBinding {
@@ -268,7 +387,12 @@ mod tests {
         let mut buf = [0.0f32; 4];
         assert!(OutputValue::from_buffer(&mut buf, &[-1, 4], &mem).is_err());
         assert!(OutputValue::from_buffer(&mut buf, &[5], &mem).is_err());
-        assert!(OutputValue::from_buffer(&mut buf, &[2, 2], &mem).is_ok());
+        let mut value = OutputValue::from_buffer(&mut buf, &[2, 2], &mem).unwrap();
+        value
+            .as_mut_slice::<f32>()
+            .unwrap()
+            .copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(value.as_slice::<f32>().unwrap(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]

@@ -6,13 +6,14 @@
 //! Tensor::from_buffer (zero-copy input) → run → OwnedValue::as_slice (zero-copy output).
 
 use st_zrt::{
-    Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, DynamicIoOptions, DynamicIoRuntime,
-    Environment, GraphOptimizationLevel, IoBinding, IoDirection, LaneBufferPolicy, LoggingLevel,
-    MemType, MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
-    PrepackedWeightsContainer, RunOptions, Runtime, RuntimeMode, Session, SessionOptions,
-    ShapeSpec, StaticIoLane, StaticIoRuntime, Tensor, TensorBuffer, sys,
+    AllocatedTensor, Allocator, AllocatorType, ArenaCfg, ArenaExtendStrategy, BufferSpec,
+    BufferStorage, DynamicIoOptions, DynamicIoRuntime, EnvCreationOptions, Environment,
+    GraphOptimizationLevel, IoBinding, IoDirection, LogRecord, LoggingLevel, MemType, MemoryClass,
+    MemoryInfo, ModelMetadata, OutputValue, OwnedInitializer, OwnedValue,
+    PrepackedWeightsContainer, RunOptions, Runtime, RuntimeMode, ServingLane, Session,
+    SessionOptions, ShapeSpec, StaticIoRuntime, Tensor, TensorBuffer, ThreadingOptions, sys,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 fn f32_as_bytes(values: &[f32]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(values.as_ptr().cast(), std::mem::size_of_val(values)) }
@@ -46,6 +47,599 @@ fn mnist_session(env: &Environment) -> Option<(MemoryInfo, Session)> {
     let opts = SessionOptions::new().with_opt_level(GraphOptimizationLevel::All);
     let sess = Session::new(env, path.to_str().unwrap(), opts).expect("session");
     Some((mem, sess))
+}
+
+#[test]
+fn session_clone_keeps_native_session_and_environment_alive() {
+    let env = Environment::new().expect("env");
+    let Some((mem, session)) = mnist_session(&env) else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+    let shared = session.clone();
+    drop(session);
+    drop(env);
+
+    let input_buf = vec![0.0_f32; 784];
+    let input = Tensor::from_buffer(&input_buf, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs = [None];
+    shared
+        .run(&[&input], &mut outputs)
+        .expect("run through surviving clone");
+    assert_eq!(outputs[0].as_ref().unwrap().element_count(), 10);
+}
+
+#[test]
+fn session_owned_allocator_tensor_outlives_public_session_handles() {
+    let env = Environment::new().expect("env");
+    let Some((mem, session)) = mnist_session(&env) else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+    let mut tensor =
+        AllocatedTensor::<f32>::for_session(&session, &mem, &[16]).expect("session-owned tensor");
+    drop(session);
+    drop(env);
+
+    tensor
+        .as_mut_slice()
+        .expect("guarded tensor remains usable")
+        .fill(7.0);
+    assert_eq!(tensor.as_slice().expect("guarded tensor read"), &[7.0; 16]);
+    drop(tensor);
+}
+
+#[test]
+fn io_binding_keeps_its_session_alive_and_rejects_another_session() {
+    let env = Environment::new().expect("env");
+    let Some((_mem, session_a)) = mnist_session(&env) else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+    let Some((_mem, session_b)) = mnist_session(&env) else {
+        unreachable!("the model existed for the first session")
+    };
+    let binding = IoBinding::new(&session_a).expect("binding");
+    // SAFETY: this call is expected to fail its session-identity check before entering ORT.
+    let err = unsafe { session_b.run_binding_unsynchronized(&binding) }
+        .expect_err("cross-session binding must be rejected before ORT");
+    assert!(err.to_string().contains("different Session"));
+
+    drop(session_a);
+    drop(session_b);
+    drop(env);
+    assert!(
+        binding
+            .output_names()
+            .expect("binding remains valid")
+            .is_empty(),
+        "fresh binding should have no output names"
+    );
+    drop(binding);
+}
+
+#[test]
+fn lora_adapter_from_array_rejects_invalid_bytes() {
+    // A LoRA adapter must be a valid ONNX adapter document; garbage bytes must surface as an
+    // ORT error (never a panic), and the failed-construction path must drop cleanly (no handle
+    // leaks — `create` returns `Err` before `Self` is ever built, so `Drop` does not run).
+    let _env = Environment::new().expect("env");
+    let bogus = b"not an onnx lora adapter";
+    let err = st_zrt::LoraAdapter::from_array(bogus)
+        .err()
+        .expect("invalid lora adapter bytes must error, not panic");
+    assert!(
+        !err.to_string().is_empty(),
+        "expected a descriptive ORT error message"
+    );
+}
+
+#[test]
+fn compatibility_info_preflight_before_load() {
+    // The compat pre-flight answers "will this model run on EP X?" without loading it. For the
+    // always-registered CPU EP it returns a non-empty info blob for a valid model and surfaces an
+    // ORT error (never a panic) for unparsable bytes.
+    let _env = Environment::new().expect("env");
+    let path = mnist_path();
+    if !path.exists() {
+        eprintln!("skipping compat pre-flight — mnist.onnx absent");
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("read mnist bytes");
+    // MNIST is a standard (non-precompiled) ONNX model, so it carries no EP compatibility
+    // metadata — the pre-flight returns Ok(None) (a null out-pointer), proving the parse +
+    // allocator-free path works without needing a precompiled fixture.
+    assert_eq!(
+        st_zrt::compatibility_info_from_bytes(&bytes, "CPUExecutionProvider").expect("ok"),
+        None,
+        "standard model has no precompiled compat info"
+    );
+    assert_eq!(
+        st_zrt::compatibility_info_from_path(path.to_str().unwrap(), "CPUExecutionProvider")
+            .expect("ok"),
+        None,
+        "standard model (path) has no precompiled compat info"
+    );
+    // Garbage model bytes must surface as an ORT error, never a panic.
+    assert!(
+        st_zrt::compatibility_info_from_bytes(b"not an onnx model", "CPUExecutionProvider")
+            .is_err()
+    );
+}
+
+#[test]
+fn external_initializer_info_round_trips() {
+    // The info handle just describes a (path, offset, size) external-data region; the getters
+    // must round-trip the construction values exactly.
+    let info = st_zrt::ExternalInitializerInfo::new("/tmp/weights.bin", 4096, 1024)
+        .expect("create external initializer info");
+    assert_eq!(info.file_path().expect("path"), "/tmp/weights.bin");
+    assert_eq!(info.file_offset(), 4096);
+    assert_eq!(info.byte_size(), 1024);
+}
+
+#[test]
+fn external_initializers_batch_replaces_external_backing() {
+    // AddExternalInitializers replaces an initializer the model marks external-data with an
+    // in-memory OrtValue (name/shape/dtype must match). external_add.onnx's C is external
+    // (its .data holds [2,2,2,2]); we supply [7,7,7,7] instead — no .data file needed — and the
+    // run resolves Y = X + C with the supplied value.
+    let fixture_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+    let onnx = fixture_dir.join("external_add.onnx");
+    if !onnx.exists() {
+        eprintln!(
+            "skipping — external_add fixture absent \
+             (regenerate: python3 tests/fixtures/gen_external_data.py)"
+        );
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("st-zrt-ext-batch-{}.onnx", std::process::id()));
+    std::fs::copy(&onnx, &tmp).expect("copy onnx to temp (no .data sibling)");
+
+    let env = Environment::new().expect("env");
+    let mem = MemoryInfo::cpu().expect("cpu mem");
+    let c = TensorBuffer::from_vec(vec![7.0_f32; 4], &[4], &mem).expect("C buffer");
+    let init = OwnedInitializer::tensor("C", c).expect("initializer");
+    let sess = Session::new_with_external_initializers(
+        &env,
+        tmp.to_str().unwrap(),
+        SessionOptions::new().with_opt_level(GraphOptimizationLevel::All),
+        vec![init],
+    )
+    .expect("session with batch external initializer");
+    let x = vec![1.0_f32; 4];
+    let input = Tensor::from_buffer(&x, &[4], &mem).expect("X");
+    let mut out: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut out).expect("run");
+    let y = out[0].as_ref().unwrap().as_slice::<f32>().unwrap();
+    assert_eq!(y, &[8.0_f32; 4], "1 + supplied C(=7)");
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn external_initializer_files_in_memory() {
+    // The model's C initializer lives in a sibling .data file. Copy the .onnx to a temp dir
+    // WITHOUT the .data sibling, then supply C's bytes from memory — session creation succeeds
+    // only via AddExternalInitializersFromFilesInMemory.
+    let fixture_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+    let onnx = fixture_dir.join("external_add.onnx");
+    let data = fixture_dir.join("external_add.onnx.data");
+    if !onnx.exists() || !data.exists() {
+        eprintln!(
+            "skipping — external_add fixture absent \
+             (regenerate: python3 tests/fixtures/gen_external_data.py)"
+        );
+        return;
+    }
+    let data_bytes = std::fs::read(&data).expect("read .data");
+    let tmp = std::env::temp_dir().join(format!("st-zrt-ext-add-{}.onnx", std::process::id()));
+    std::fs::copy(&onnx, &tmp).expect("copy onnx to temp (no .data sibling)");
+
+    let env = Environment::new().expect("env");
+    let mem = MemoryInfo::cpu().expect("cpu mem");
+    let sess = Session::new_with_external_initializer_files(
+        &env,
+        tmp.to_str().unwrap(),
+        SessionOptions::new().with_opt_level(GraphOptimizationLevel::All),
+        vec![("external_add.onnx.data".to_string(), data_bytes)],
+    )
+    .expect("session via in-memory external initializer file");
+    let x = vec![1.0_f32; 4];
+    let input = Tensor::from_buffer(&x, &[4], &mem).expect("X");
+    let mut out: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut out).expect("run");
+    let y = out[0].as_ref().unwrap().as_slice::<f32>().unwrap();
+    assert_eq!(y, &[3.0_f32; 4], "1 + externalized C(=2)");
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn run_options_profiling_and_log_getters_round_trip() {
+    // Pure configuration composes without FFI; freezing applies every field once.
+    let config = RunOptions::new()
+        .with_log_severity(LoggingLevel::Error)
+        .with_log_verbosity(3)
+        .with_profiling("st-zrt-profile");
+    assert_eq!(
+        config.log_severity().expect("config severity"),
+        Some(LoggingLevel::Error)
+    );
+    assert_eq!(config.log_verbosity(), Some(3));
+    assert_eq!(config.profiling_prefix(), Some("st-zrt-profile"));
+    let opts = config.freeze().expect("freeze run opts");
+    assert_eq!(
+        opts.log_severity().expect("get severity"),
+        LoggingLevel::Error
+    );
+    assert_eq!(opts.log_verbosity().expect("get verbosity"), 3);
+}
+
+#[test]
+fn string_tensor_element_access_round_trips() {
+    // Per-element read/write on a string tensor. The two write paths (NUL-terminated and raw
+    // UTF-8 bytes) and the read path must all agree.
+    let mut t =
+        st_zrt::StringTensor::new(&["alpha", "beta", "gamma"], &[3]).expect("string tensor");
+    assert_eq!(t.element(0).expect("elem 0"), "alpha");
+    t.set_element(1, "BETA").expect("set elem 1");
+    assert_eq!(t.element(1).expect("elem 1"), "BETA");
+    // Raw UTF-8 bytes, no NUL terminator (GetResizedStringTensorElementBuffer path).
+    t.set_element_utf8(2, b"GAMMA").expect("set elem 2 utf8");
+    assert_eq!(t.element(2).expect("elem 2"), "GAMMA");
+}
+
+#[test]
+fn hardware_enumeration_and_ep_incompatibility_details() {
+    // A CPU host enumerates its hardware devices; the always-registered CPU EP yields
+    // (compatible, empty) incompatibility details, while an EP with no registered factory
+    // surfaces an ORT error. Together these exercise all 7 hardware/incompatibility accessors.
+    let env = Environment::new().expect("env");
+    let n = st_zrt::num_hardware_devices(&env).expect("num hardware devices");
+    assert!(n >= 1, "a CPU host enumerates at least one hardware device");
+    let devs = st_zrt::hardware_devices(&env).expect("hardware devices");
+    assert_eq!(devs.len(), n);
+
+    // CPU EP applies to a CPU device -> Some(details); all three getters must succeed.
+    let det =
+        st_zrt::hardware_device_ep_incompatibility_details(&env, "CPUExecutionProvider", &devs[0])
+            .expect("incompat probe")
+            .expect("CPU EP on a CPU device yields details");
+    // reasons=0 / code=0 / empty notes means "compatible"; we only require the getters to run.
+    let _ = det.reasons_bitmask().expect("reasons bitmask");
+    let _ = det.error_code().expect("error code");
+    let _ = det.notes().expect("notes");
+
+    // An EP with no registered factory on this build must surface an ORT error, not a panic.
+    assert!(
+        st_zrt::hardware_device_ep_incompatibility_details(&env, "FakeExecutionProvider", &devs[0])
+            .is_err()
+    );
+}
+
+#[test]
+fn diagnostics_providers_and_build_info() {
+    let providers = st_zrt::available_providers().expect("providers");
+    assert!(
+        providers.iter().any(|p| p == "CPUExecutionProvider"),
+        "CPU EP must be available: {providers:?}"
+    );
+    let info = st_zrt::build_info().expect("build info");
+    assert!(!info.is_empty(), "build info must be non-empty");
+    // GPU device id get/set are best-effort on a CPU host (may error); exercise the FFI only.
+    let _ = st_zrt::set_current_gpu_device_id(0);
+    let _ = st_zrt::current_gpu_device_id();
+}
+
+#[test]
+fn environment_telemetry_toggle() {
+    let env = Environment::new().expect("env");
+    env.enable_telemetry_events().expect("enable telemetry");
+    env.disable_telemetry_events().expect("disable telemetry");
+}
+
+#[test]
+fn environment_language_projection_round_trips() {
+    let env = Environment::new().expect("env");
+    env.set_language_projection(st_zrt::LanguageProjection::Python)
+        .expect("set projection");
+    // Setting a different projection must also succeed (the FFI accepts any known value).
+    env.set_language_projection(st_zrt::LanguageProjection::CPlusPlus)
+        .expect("c++ projection");
+}
+
+#[test]
+fn environment_per_session_thread_pool_callbacks_reaches_ffi() {
+    // The stock ORT release is not built with --enable_session_threadpool_callbacks, so the FFI
+    // returns a clean INVALID_ARGUMENT. We assert that build-flag error to prove the call reached
+    // ORT with a well-formed versioned config (no UB); a custom ORT build with the flag would
+    // accept it.
+    let env = Environment::new().expect("env");
+    let cfg = st_zrt::ThreadPoolCallbacksConfig::new();
+    let err = env
+        .set_per_session_thread_pool_callbacks(&cfg)
+        .expect_err("stock ORT rejects per-session callbacks");
+    assert!(
+        err.to_string().contains("session_threadpool_callbacks"),
+        "expected the build-flag error, got: {err}"
+    );
+}
+
+#[test]
+fn session_set_ep_dynamic_options_reaches_ffi() {
+    // SetEpDynamicOptions on a CPU EP typically returns a clean ORT error (the CPU EP has no
+    // dynamic options) — the test asserts only that the call reaches the FFI and returns a
+    // well-formed Result (never panics / no UB).
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("overridable_add.onnx");
+    if !path.exists() {
+        eprintln!(
+            "skipping — overridable_add.onnx absent \
+             (regenerate: python3 tests/fixtures/gen_overridable.py)"
+        );
+        return;
+    }
+    let env = Environment::new().expect("env");
+    let sess = Session::new(
+        &env,
+        path.to_str().unwrap(),
+        SessionOptions::new().with_opt_level(GraphOptimizationLevel::All),
+    )
+    .expect("session");
+    match sess.set_ep_dynamic_options(&[("device_id", "0")]) {
+        Ok(()) => eprintln!("set_ep_dynamic_options: accepted"),
+        Err(e) => eprintln!("set_ep_dynamic_options: clean ORT error ({e})"),
+    }
+}
+
+#[test]
+fn memory_info_v2_and_equals_round_trip() {
+    // CreateMemoryInfo_V2 (richer constructor) + CompareMemoryInfo. Pure — no global state.
+    let v2 = MemoryInfo::new_v2(
+        "Cpu",
+        st_zrt::MemoryInfoDeviceType::Cpu,
+        0,
+        0,
+        st_zrt::DeviceMemoryType::Default,
+        0,
+        AllocatorType::Device,
+    )
+    .expect("new_v2");
+    assert_eq!(v2.name().expect("name"), "Cpu");
+    assert_eq!(v2.class(), MemoryClass::Cpu);
+    assert!(v2.is_host_accessible());
+    assert_eq!(v2.snapshot().expect("snapshot").class, MemoryClass::Cpu);
+
+    let cpu1 = MemoryInfo::cpu().expect("cpu1");
+    let cpu2 = MemoryInfo::cpu().expect("cpu2");
+    assert!(
+        cpu1.equals(&cpu2).expect("cpu==cpu"),
+        "two cpu() memory infos must compare equal"
+    );
+    let cuda = MemoryInfo::cuda(0).expect("cuda");
+    assert_eq!(cuda.class(), MemoryClass::CudaDevice);
+    assert!(!cuda.is_host_accessible());
+    let cuda_pinned = MemoryInfo::cuda_pinned(0).expect("cuda pinned");
+    assert_eq!(cuda_pinned.class(), MemoryClass::CudaPinned);
+    assert!(cuda_pinned.is_host_accessible());
+    let cuda_shared = MemoryInfo::new_v2(
+        "CudaShared",
+        st_zrt::MemoryInfoDeviceType::Gpu,
+        0,
+        0,
+        st_zrt::DeviceMemoryType::HostAccessible,
+        0,
+        AllocatorType::Device,
+    )
+    .expect("CUDA shared host memory");
+    assert_eq!(cuda_shared.class(), MemoryClass::CudaPinned);
+    assert!(cuda_shared.is_host_accessible());
+
+    let other = MemoryInfo::new_v2(
+        "ExampleNpu",
+        st_zrt::MemoryInfoDeviceType::Npu,
+        0,
+        0,
+        st_zrt::DeviceMemoryType::Default,
+        0,
+        AllocatorType::Device,
+    )
+    .expect("other device");
+    assert_eq!(other.class(), MemoryClass::OtherDevice);
+    assert!(!other.is_host_accessible());
+    assert!(
+        !cpu1.equals(&cuda).expect("cpu!=cuda"),
+        "cpu and cuda memory infos must differ"
+    );
+}
+
+#[test]
+fn allocator_memory_info_snapshot_is_host_accessible() {
+    // AllocatorGetInfo: the default allocator's memory info is CPU / host-accessible.
+    let alloc = Allocator::get_default().expect("default alloc");
+    let snap = alloc.memory_info().expect("allocator memory info");
+    assert!(
+        snap.is_host_accessible(),
+        "default allocator is host-accessible"
+    );
+    assert_eq!(snap.name, "Cpu");
+}
+
+#[test]
+fn environment_allocator_v2_registration_reaches_ffi() {
+    // CreateAndRegisterAllocatorV2 + RegisterAllocator + UnregisterAllocator. These mutate the
+    // env's allocator registry; we assert only that the FFI is reached cleanly (Ok or a clean ORT
+    // error), not a specific outcome, to avoid coupling to ORT's allocator-registry state.
+    let env = Environment::new().expect("env");
+    let mem = MemoryInfo::cpu().expect("mem");
+    let cfg =
+        ArenaCfg::new(usize::MAX, ArenaExtendStrategy::NextPowerOfTwo, 1024, 0).expect("arena cfg");
+    match env.create_and_register_allocator_v2("CPUExecutionProvider", &mem, &cfg, &[]) {
+        Ok(()) => eprintln!("create_and_register_allocator_v2: accepted"),
+        Err(e) => eprintln!("create_and_register_allocator_v2: clean ORT error ({e})"),
+    }
+    let alloc = Allocator::get_default().expect("default alloc");
+    let _ = env.register_existing_allocator(&alloc);
+    let _ = env.unregister_allocator(&mem);
+}
+
+#[test]
+fn environment_ep_library_registration_reaches_ffi() {
+    // RegisterExecutionProviderLibrary + UnregisterExecutionProviderLibrary. A bogus library path
+    // surfaces as a clean error; unregistering an unknown name likewise. Both prove the FFI was
+    // reached without UB.
+    let env = Environment::new().expect("env");
+    let _ = env.register_execution_provider_library("bogus_ep", "/nonexistent/libep.so");
+    let _ = unsafe { env.unregister_execution_provider_library("bogus_ep") };
+}
+
+#[test]
+fn run_options_run_tag_and_unset_terminate() {
+    let config = RunOptions::new().with_run_tag("batch-42");
+    assert_eq!(config.run_tag(), Some("batch-42"));
+    let opts = config.freeze().expect("freeze run opts");
+    assert_eq!(opts.run_tag().expect("tag"), "batch-42");
+    opts.unset_terminate().expect("unset terminate");
+}
+
+#[test]
+fn session_overridable_initializers_introspect() {
+    // overridable_add.onnx declares C as both a graph input and an initializer, so ORT marks it
+    // overridable (count == 1). Exercises the count/name/type-info accessors.
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("overridable_add.onnx");
+    if !path.exists() {
+        eprintln!(
+            "skipping — overridable_add.onnx absent \
+             (regenerate: python3 tests/fixtures/gen_overridable.py)"
+        );
+        return;
+    }
+    let env = Environment::new().expect("env");
+    let sess = Session::new(
+        &env,
+        path.to_str().unwrap(),
+        SessionOptions::new().with_opt_level(GraphOptimizationLevel::All),
+    )
+    .expect("session");
+    assert_eq!(
+        sess.overridable_initializer_count().expect("count"),
+        1,
+        "C is the single overridable initializer"
+    );
+    assert_eq!(sess.overridable_initializer_name(0).expect("name 0"), "C");
+    let ti = sess
+        .overridable_initializer_type_info(0)
+        .expect("type info 0");
+    assert_eq!(ti.onnx_type().expect("onnx type"), sys::OnnxType::Tensor);
+}
+
+#[test]
+fn iobinding_output_names_round_trips() {
+    // `GetBoundOutputNames` (idx 139): after binding an output, the binding must report it back.
+    // Uses a committed fixture so the test always runs (no skip).
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("overridable_add.onnx");
+    if !path.exists() {
+        eprintln!(
+            "skipping — overridable_add.onnx absent \
+             (regenerate: python3 tests/fixtures/gen_overridable.py)"
+        );
+        return;
+    }
+    let env = Environment::new().expect("env");
+    let sess = Session::new(
+        &env,
+        path.to_str().unwrap(),
+        SessionOptions::new().with_opt_level(GraphOptimizationLevel::All),
+    )
+    .expect("session");
+    let mem = MemoryInfo::cpu().expect("cpu mem");
+    let mut binding = IoBinding::new(&sess).expect("binding");
+    let out0 = sess.output_name(0).expect("output name 0");
+    binding
+        .bind_output_device(out0, &mem)
+        .expect("bind output to device");
+    let names = binding.output_names().expect("output names");
+    assert!(
+        names.iter().any(|n| n.as_str() == out0),
+        "bound output {out0:?} must be reported by output_names(): {names:?}"
+    );
+}
+
+#[test]
+fn run_options_config_entry_round_trips() {
+    let _env = Environment::new().expect("env");
+    let config = RunOptions::new()
+        .with_config("test.key", "value-1")
+        .expect("add");
+    assert_eq!(config.config_entry("unset.key"), None);
+    assert_eq!(config.config_entry("test.key"), Some("value-1"));
+    let opts = config.freeze().expect("freeze");
+    assert_eq!(
+        opts.config_entry("test.key").expect("get"),
+        Some("value-1".to_string())
+    );
+}
+
+#[test]
+fn run_options_disable_execution_provider_sync_round_trips() {
+    let _env = Environment::new().expect("env");
+    let config = RunOptions::enqueued(7);
+    assert_eq!(
+        config.config_entry("disable_synchronize_execution_providers"),
+        Some("1")
+    );
+    assert_eq!(config.config_entry("gpu_graph_id"), Some("7"));
+    assert_eq!(config.graph_id(), Some(7));
+    let opts = config.freeze().expect("freeze enqueued options");
+    assert_eq!(
+        opts.config_entry("disable_synchronize_execution_providers")
+            .expect("get disable sync"),
+        Some("1".to_string())
+    );
+    assert_eq!(
+        opts.config_entry("gpu_graph_id").expect("get graph id"),
+        Some("7".to_string())
+    );
+
+    let config = RunOptions::new().with_disable_ep_sync(false);
+    assert_eq!(
+        config.config_entry("disable_synchronize_execution_providers"),
+        Some("0")
+    );
+}
+
+#[test]
+fn session_options_has_config_entry() {
+    let opts = SessionOptions::new()
+        .with_config_entry("my.custom.key", "v")
+        .expect("with config");
+    assert!(
+        opts.has_config_entry("my.custom.key").expect("has"),
+        "a set config entry must be present"
+    );
+}
+
+#[test]
+fn key_value_pairs_round_trip() {
+    let mut kv = st_zrt::KeyValuePairs::new().expect("new kvps");
+    assert_eq!(kv.get("absent").expect("get absent"), None);
+    kv.add("k", "v1").expect("add");
+    assert_eq!(kv.get("k").expect("get"), Some("v1".to_string()));
+    kv.add("k", "v2").expect("replace");
+    assert_eq!(kv.get("k").expect("get replaced"), Some("v2".to_string()));
+    kv.remove("k").expect("remove");
+    assert_eq!(kv.get("k").expect("get removed"), None);
 }
 
 #[test]
@@ -514,7 +1108,7 @@ fn tensor_io_lane_buffer_policy_controls_alignment() {
             &mem,
             &[&[1, 1, 28, 28]],
             &[&[1, 10]],
-            LaneBufferPolicy::AlignedPrefaulted { alignment: 64 },
+            BufferSpec::aligned(64).prefault(),
         )
         .expect("aligned lane");
     assert_eq!((lane.input(0).expect("input").as_ptr() as usize) % 64, 0);
@@ -529,7 +1123,7 @@ fn tensor_io_lane_buffer_policy_controls_alignment() {
             &mem,
             &[&[1, 1, 28, 28]],
             &[&[1, 10]],
-            LaneBufferPolicy::AlignedMlockedPrefaulted { alignment: 4096 },
+            BufferSpec::aligned(4096).mlock().prefault(),
         )
         .expect("mlocked lane");
     assert_eq!(
@@ -661,7 +1255,7 @@ fn runtime_shared_session_runs_exclusive_lanes() {
     };
 
     let mut runtime =
-        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
+        Runtime::<f32>::shared_session(sess, &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
             .expect("runtime");
     assert_eq!(runtime.len(), 2);
     assert_eq!(runtime.session_mode(), RuntimeMode::SharedSession);
@@ -698,37 +1292,14 @@ fn runtime_runs_without_checkout() {
         },
     };
 
-    let mut lanes =
-        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
-            .expect("lane set");
+    let mut lanes = Runtime::<f32>::shared_session(sess, &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
+        .expect("lane set");
     assert_eq!(lanes.len(), 2);
     assert_eq!(lanes.session_mode(), RuntimeMode::SharedSession);
     assert!(lanes.lane(2).is_err());
     assert!(lanes.lane_mut(2).is_err());
 
     let lane = lanes.lane_mut(0).expect("lane 0");
-    lane.input_mut(0).expect("lane input").fill(0.0);
-    lane.run().expect("lane run");
-    assert_eq!(lane.output(0).expect("lane output").len(), 10);
-}
-
-#[test]
-fn runtime_converts_into_lane_set() {
-    let env = Environment::new().expect("env");
-    let (mem, sess) = match mnist_session(&env) {
-        Some(v) => v,
-        None => {
-            eprintln!("skipping — mnist.onnx absent");
-            return;
-        },
-    };
-
-    let runtime =
-        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 1)
-            .expect("runtime");
-    let mut lanes = runtime.into_lane_set();
-    assert_eq!(lanes.len(), 1);
-    let lane = lanes.lane_mut(0).expect("lane");
     lane.input_mut(0).expect("lane input").fill(0.0);
     lane.run().expect("lane run");
     assert_eq!(lane.output(0).expect("lane output").len(), 10);
@@ -850,10 +1421,9 @@ fn static_io_lane_runs_static_typed_io() {
         },
     };
 
-    let session = Arc::new(sess);
-    let mut lane =
-        StaticIoLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
-            .expect("static I/O lane");
+    let session = sess;
+    let mut lane = ServingLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("static I/O lane");
     lane.input_mut_at::<0>().expect("input").fill(0.0);
     lane.run().expect("run");
     assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
@@ -870,13 +1440,150 @@ fn static_io_lane_runs_unsynchronized_host_binding() {
         },
     };
 
-    let session = Arc::new(sess);
-    let mut lane =
-        StaticIoLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
-            .expect("static I/O lane");
+    let session = sess;
+    let mut lane = ServingLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("static I/O lane");
     lane.input_mut_at::<0>().expect("input").fill(0.0);
     lane.run_unsynchronized().expect("run");
     assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+}
+
+#[test]
+fn static_io_lane_enqueued_run_syncs_outputs_explicitly() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = sess;
+    let mut lane = ServingLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("static I/O lane");
+    lane.input_mut_at::<0>().expect("input").fill(0.0);
+    lane.run_enqueued().expect("enqueue run");
+    lane.synchronize_outputs().expect("sync outputs");
+    assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+}
+
+/// Mutable lane accessors must reject while the lane is in flight after the legacy
+/// `run_enqueued`: a pending run may still be reading the staging buffers and writing the output
+/// buffers, so mutation before `synchronize_outputs` is a data race. After synchronization the
+/// mutators succeed again.
+#[test]
+fn static_io_lane_mutators_reject_in_flight_runs() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = sess;
+    let mut lane = ServingLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("static I/O lane");
+    lane.input_mut_at::<0>().expect("idle input").fill(0.0);
+    lane.inputs_mut()
+        .expect("idle inputs_mut")
+        .iter_mut()
+        .for_each(|buffer| buffer.as_mut_slice().fill(0.0));
+    lane.outputs_mut().expect("idle outputs_mut");
+    lane.run_enqueued().expect("enqueue run");
+
+    for label in [
+        "input_mut",
+        "input_mut_at",
+        "inputs_mut",
+        "output_mut",
+        "outputs_mut",
+    ] {
+        let error = match label {
+            "input_mut" => lane.input_mut(0).expect_err(label),
+            "input_mut_at" => lane.input_mut_at::<0>().expect_err(label),
+            "inputs_mut" => lane.inputs_mut().expect_err(label),
+            "output_mut" => lane.output_mut(0).expect_err(label),
+            _ => lane.outputs_mut().expect_err(label),
+        };
+        assert!(
+            error.to_string().contains("in-flight"),
+            "{label} must reject an in-flight lane, got: {error}"
+        );
+    }
+    // Read access that only reports placement/state stays available; mutation does not.
+    assert!(lane.input(0).is_ok());
+
+    lane.synchronize_outputs().expect("sync outputs");
+    lane.input_mut_at::<0>()
+        .expect("input after synchronize")
+        .fill(1.0);
+    lane.inputs_mut().expect("inputs_mut after synchronize");
+    lane.outputs_mut().expect("outputs_mut after synchronize");
+    lane.run().expect("lane reusable after sync");
+    assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+}
+
+#[test]
+fn static_io_lane_owned_in_flight_token_returns_the_lane() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = sess;
+    let mut lane = ServingLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("static I/O lane");
+    lane.input_mut_at::<0>().expect("input").fill(0.0);
+
+    // `enqueue` consumes the lane into an owned token; `synchronize` fences and returns it.
+    lane = lane
+        .enqueue()
+        .expect("enqueue token")
+        .synchronize()
+        .expect("token sync");
+    assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+
+    // The compatibility split API cannot enqueue twice onto the same staging/output buffers.
+    lane.run_enqueued().expect("legacy enqueue");
+    assert!(lane.run_enqueued().is_err());
+    lane.synchronize_outputs().expect("legacy sync");
+    lane.run().expect("lane reusable after sync");
+}
+
+#[test]
+fn static_io_lane_owned_enqueue_on_busy_lane_returns_the_lane() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let session = sess;
+    let mut lane = ServingLane::<f32, f32, 1, 1>::new(session, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("static I/O lane");
+    lane.input_mut_at::<0>().expect("input").fill(0.0);
+    lane.run_enqueued().expect("legacy enqueue");
+
+    // A busy lane cannot be moved into an owned token; the error returns the lane.
+    let failed = lane.enqueue().expect_err("busy lane must not enqueue");
+    assert!(
+        failed.error.to_string().contains("in-flight"),
+        "unexpected error: {}",
+        failed.error
+    );
+    let mut lane = failed.lane;
+    lane.synchronize_outputs().expect("fence busy lane");
+    lane.run().expect("lane reusable after fence");
 }
 
 #[test]
@@ -890,7 +1597,7 @@ fn static_io_lane_hot_path_audit_reports_zero_copy_plan() {
         },
     };
 
-    let session = Arc::new(sess);
+    let session = sess;
     let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
         session,
         &mem,
@@ -923,7 +1630,7 @@ fn static_io_runtime_runs_shared_typed_lanes() {
         },
     };
 
-    let session = Arc::new(sess);
+    let session = sess;
     let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
         session,
         &mem,
@@ -956,7 +1663,7 @@ fn dynamic_io_runtime_caches_and_runs_shape_bucket() {
         },
     };
 
-    let session = Arc::new(sess);
+    let session = sess;
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(session, mem, 2)
         .expect("dynamic I/O runtime");
     assert_eq!(runtime.bucket_count(), 0);
@@ -995,7 +1702,388 @@ fn dynamic_io_runtime_caches_and_runs_shape_bucket() {
         .get_or_create_bucket([&[1, 1, 28, 28]], [&[1, 10]])
         .expect("recreate bucket");
     assert_eq!(runtime.bucket_count(), 1);
-    runtime.clear_buckets();
+    runtime.clear_buckets().expect("clear buckets");
+    assert_eq!(runtime.bucket_count(), 0);
+}
+
+#[test]
+fn dynamic_io_owned_runs_detach_complete_and_restore_lanes() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let mut runtime =
+        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 2).expect("runtime");
+    let mut first = runtime
+        .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |lane| {
+            lane.input_mut_at::<0>()?.fill(0.0);
+            Ok(())
+        })
+        .expect("first owned run");
+    assert!(
+        first.lane().is_err(),
+        "an owned run must not expose buffers before synchronization"
+    );
+    let second = runtime
+        .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |lane| {
+            lane.input_mut_at::<0>()?.fill(0.0);
+            Ok(())
+        })
+        .expect("second owned run");
+    let error = runtime
+        .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |_| Ok(()))
+        .expect_err("all lanes are detached");
+    assert!(error.to_string().contains("all lanes"));
+    first.synchronize().expect("explicit first sync");
+    assert_eq!(
+        first
+            .lane()
+            .expect("synchronized lane")
+            .output_at::<0>()
+            .expect("output")
+            .len(),
+        10
+    );
+    let first_len = runtime
+        .complete_owned(first, |lane| Ok(lane.output_at::<0>()?.len()))
+        .expect("complete first");
+    assert_eq!(first_len, 10);
+    let second_len = runtime
+        .complete_owned(second, |lane| Ok(lane.output_at::<0>()?.len()))
+        .expect("complete second");
+    assert_eq!(second_len, 10);
+    assert_eq!(runtime.buckets()[0].lanes().len(), 2);
+}
+
+#[test]
+fn dynamic_io_runtime_clear_fences_in_flight_lanes() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
+        .expect("dynamic I/O runtime");
+    {
+        let bucket = runtime
+            .get_or_create_bucket([&[1, 1, 28, 28]], [&[1, 10]])
+            .expect("bucket");
+        let lane = bucket.lane_mut(0).expect("lane");
+        lane.input_mut_at::<0>().expect("input").fill(0.0);
+        lane.run_enqueued().expect("enqueue");
+    }
+    runtime.clear_buckets().expect("clear buckets");
+    assert_eq!(runtime.bucket_count(), 0);
+}
+
+#[test]
+fn dynamic_io_runtime_owned_runs_pipeline_out_of_order_completion() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 3)
+        .expect("dynamic I/O runtime");
+
+    let mut tokens = Vec::new();
+    for i in 0..3 {
+        let run = runtime
+            .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |lane| {
+                lane.input_mut_at::<0>()
+                    .expect("input")
+                    .fill(i as f32 * 0.25);
+                Ok(())
+            })
+            .expect("owned enqueue");
+        tokens.push(run);
+    }
+    assert_eq!(
+        runtime
+            .bucket([&[1, 1, 28, 28]], [&[1, 10]])
+            .expect("bucket")
+            .lanes()
+            .len(),
+        0,
+        "all lanes must be detached while tokens are alive"
+    );
+    assert!(
+        !runtime.remove_bucket([&[1, 1, 28, 28]], [&[1, 10]]),
+        "a bucket with owned runs must not be retired"
+    );
+
+    // Complete in reverse enqueue order; every lane must come back and outputs must be readable.
+    for (i, run) in tokens.drain(..).enumerate().rev() {
+        let output = runtime
+            .complete_owned(run, |lane| {
+                Ok(lane.output_at::<0>().expect("output").to_vec())
+            })
+            .expect("complete owned run");
+        assert_eq!(output.len(), 10);
+        let _ = i;
+    }
+    let bucket = runtime
+        .bucket([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("bucket");
+    assert_eq!(bucket.lanes().len(), 3, "all lanes returned to the bucket");
+    assert_eq!(bucket.detached_lane_count(), 0);
+}
+
+#[test]
+fn dynamic_io_runtime_reclaims_dropped_owned_runs_and_guards_clear() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 2)
+        .expect("dynamic I/O runtime");
+
+    runtime
+        .prebuild_buckets([ShapeSpec::new([&[1, 1, 28, 28]], [&[1, 10]])])
+        .expect("prebuild");
+    let prepared = runtime
+        .prepared_bucket_id([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("prepared id");
+    let run = runtime
+        .enqueue_prepared(prepared, |lane| {
+            lane.input_mut_at::<0>().expect("input").fill(0.5);
+            Ok(())
+        })
+        .expect("owned enqueue");
+    let err = runtime
+        .clear_buckets()
+        .expect_err("live owned run must prevent bucket clearing");
+    assert!(err.to_string().contains("owned runs are in flight"));
+
+    drop(run);
+    let replacement = runtime
+        .enqueue_prepared(prepared, |_| Ok(()))
+        .expect("prepared enqueue must reclaim a previously dropped run");
+    runtime
+        .complete_owned(replacement, |_| Ok(()))
+        .expect("complete replacement");
+    let bucket = runtime
+        .bucket([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("bucket");
+    assert_eq!(bucket.detached_lane_count(), 0);
+    assert_eq!(bucket.lanes().len(), 2, "dropped run lane was restored");
+    runtime.clear_buckets().expect("clear reclaimed bucket");
+    runtime
+        .prebuild_buckets([ShapeSpec::new([&[1, 1, 28, 28]], [&[1, 10]])])
+        .expect("rebuild into a recycled prepared slot");
+    let replacement_id = runtime
+        .prepared_bucket_id([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("replacement id");
+    assert_ne!(
+        prepared, replacement_id,
+        "recycled slot must change generation"
+    );
+    let error = runtime
+        .enqueue_prepared(prepared, |_| Ok(()))
+        .expect_err("retired prepared id must not alias a later bucket");
+    assert!(error.to_string().contains("prepared shape bucket"));
+}
+
+#[test]
+fn dynamic_io_recovery_stack_handles_concurrent_drops_without_loss() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    const LANES: usize = 16;
+    const CYCLES: usize = 100;
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, LANES)
+        .expect("dynamic I/O runtime");
+    runtime
+        .prebuild_buckets([ShapeSpec::new([&[1, 1, 28, 28]], [&[1, 10]])])
+        .expect("prebuild");
+    let prepared = runtime
+        .prepared_bucket_id([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("prepared id");
+
+    for cycle in 0..CYCLES {
+        let runs = (0..LANES)
+            .map(|lane| {
+                runtime
+                    .enqueue_prepared(prepared, |owned| {
+                        owned
+                            .input_mut_at::<0>()
+                            .expect("input")
+                            .fill((cycle * LANES + lane) as f32);
+                        Ok(())
+                    })
+                    .expect("enqueue")
+            })
+            .collect::<Vec<_>>();
+        std::thread::scope(|scope| {
+            for run in runs {
+                scope.spawn(move || drop(run));
+            }
+        });
+        runtime.reclaim_dropped_runs();
+        let bucket = runtime
+            .bucket([&[1, 1, 28, 28]], [&[1, 10]])
+            .expect("bucket");
+        assert_eq!(bucket.detached_lane_count(), 0, "cycle {cycle}");
+        assert_eq!(bucket.lanes().len(), LANES, "cycle {cycle}");
+    }
+}
+
+#[test]
+fn dynamic_io_owned_run_can_outlive_its_runtime() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let run = {
+        let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
+            .expect("dynamic I/O runtime");
+        runtime
+            .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |lane| {
+                lane.input_mut_at::<0>().expect("input").fill(0.25);
+                Ok(())
+            })
+            .expect("owned enqueue")
+    };
+    drop(run);
+}
+
+#[test]
+fn dynamic_io_runtime_owned_enqueue_error_restores_the_lane() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 2)
+        .expect("dynamic I/O runtime");
+
+    let err = runtime
+        .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |_lane| {
+            Err(st_zrt::Error::local("boom"))
+        })
+        .expect_err("prepare must fail");
+    assert!(err.to_string().contains("boom"), "unexpected error: {err}");
+    let bucket = runtime
+        .bucket([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("bucket");
+    assert_eq!(bucket.lanes().len(), 2, "failed prepare returns the lane");
+    assert_eq!(bucket.detached_lane_count(), 0);
+
+    // The lane set still runs normally afterwards.
+    runtime
+        .run_on([&[1, 1, 28, 28]], [&[1, 10]], 0, |lane| {
+            lane.input_mut_at::<0>().expect("input").fill(0.0);
+            lane.run()
+        })
+        .expect("lane runs after failed owned enqueue");
+}
+
+/// Host-input CUDA-graph configuration fails closed: ORT captures the device buffers it is handed
+/// and never repopulates them from host bindings on replay, so a host-input `cuda_graph` runtime
+/// would silently serve stale inputs. The guard fires in `DynamicIoOptions::validate` before any
+/// session/provider work, so this regression runs on CPU. The supported path is device-resident
+/// inputs on the retained user stream (hardware coverage: `cuda_ep::cuda_graph_*`).
+#[test]
+fn dynamic_io_runtime_rejects_host_input_cuda_graph() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let output_mem = mem.try_clone_descriptor().expect("output mem");
+    let err = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        sess,
+        mem,
+        output_mem,
+        2,
+        DynamicIoOptions::new(2).with_cuda_graph(true),
+    )
+    .expect_err("host-input cuda_graph must be rejected at construction");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("device-resident inputs"),
+        "guard should name the supported input path, got: {msg}"
+    );
+}
+
+/// The pipelined owned-run flow that an earlier unpublished cuda-graph test exercised stays valid
+/// graph annotation: two lanes of one bucket enqueue before either completes, complete out of
+/// order, and the bucket clears cleanly. (Graph-id plan/release coverage now lives on hardware.)
+#[test]
+fn dynamic_io_runtime_owned_runs_pipeline_and_clear_without_cuda_graph() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+    let output_mem = mem.try_clone_descriptor().expect("output mem");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        sess,
+        mem,
+        output_mem,
+        2,
+        DynamicIoOptions::new(2),
+    )
+    .expect("runtime");
+
+    let run_a = runtime
+        .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |lane| {
+            lane.input_mut_at::<0>().expect("input").fill(1.0);
+            Ok(())
+        })
+        .expect("owned enqueue a");
+    let run_b = runtime
+        .enqueue_owned([&[1, 1, 28, 28]], [&[1, 10]], |lane| {
+            lane.input_mut_at::<0>().expect("input").fill(2.0);
+            Ok(())
+        })
+        .expect("owned enqueue b");
+    runtime
+        .complete_owned(run_b, |lane| {
+            assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+            Ok(())
+        })
+        .expect("complete b");
+    runtime
+        .complete_owned(run_a, |lane| {
+            assert_eq!(lane.output_at::<0>().expect("output").len(), 10);
+            Ok(())
+        })
+        .expect("complete a");
+
+    runtime.clear_buckets().expect("clear buckets");
     assert_eq!(runtime.bucket_count(), 0);
 }
 
@@ -1010,7 +2098,7 @@ fn dynamic_io_runtime_prebuilds_and_warms_shape_plan() {
         },
     };
 
-    let session = Arc::new(sess);
+    let session = sess;
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(session, mem, 2)
         .expect("dynamic I/O runtime");
     let spec = ShapeSpec::new([&[1, 1, 28, 28][..]], [&[1, 10][..]]);
@@ -1021,7 +2109,7 @@ fn dynamic_io_runtime_prebuilds_and_warms_shape_plan() {
         .prime_cached_buckets(1)
         .expect("warm cached buckets");
 
-    runtime.clear_buckets();
+    runtime.clear_buckets().expect("clear buckets");
     assert_eq!(runtime.warm_buckets([spec], 1).expect("warm plan"), 1);
     assert_eq!(runtime.bucket_count(), 1);
     assert!(runtime.bucket([&[1, 1, 28, 28]], [&[1, 10]]).is_some());
@@ -1039,7 +2127,7 @@ fn dynamic_io_runtime_bounds_shape_buckets() {
     };
 
     let output_mem = mem.try_clone_descriptor().expect("output mem");
-    let session = Arc::new(sess);
+    let session = sess;
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
         session,
         mem,
@@ -1061,6 +2149,85 @@ fn dynamic_io_runtime_bounds_shape_buckets() {
     assert_eq!(runtime.bucket_count(), 1);
     assert!(runtime.bucket([&[1, 1, 28, 28]], [&[1, 10]]).is_none());
     assert!(runtime.bucket([&[1, 1, 28, 29]], [&[1, 10]]).is_some());
+}
+
+#[test]
+fn dynamic_io_runtime_strict_shape_cache_rejects_misses() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let output_mem = mem.try_clone_descriptor().expect("output mem");
+    let session = sess;
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        session,
+        mem,
+        output_mem,
+        1,
+        DynamicIoOptions::new(2).with_strict_shape_cache(true),
+    )
+    .expect("dynamic I/O runtime");
+    let spec = ShapeSpec::new([&[1, 1, 28, 28][..]], [&[1, 10][..]]);
+
+    assert_eq!(runtime.warm_buckets([spec], 1).expect("warm plan"), 1);
+    runtime
+        .run_on([&[1, 1, 28, 28]], [&[1, 10]], 0, |lane| {
+            lane.input_mut_at::<0>()?.fill(0.0);
+            lane.run()
+        })
+        .expect("known strict shape should run");
+
+    let err = runtime
+        .run_on(
+            [&[1, 1, 28, 29]],
+            [&[1, 10]],
+            0,
+            |_| -> st_zrt::Result<()> {
+                panic!("strict cache miss should not call the lane closure")
+            },
+        )
+        .expect_err("unknown strict shape should fail before bucket creation");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("strict_shape_cache"),
+        "unexpected error: {msg}"
+    );
+    assert_eq!(runtime.bucket_count(), 1);
+}
+
+/// The `cuda_graph` + host-input rejection also applies to the single-lane topology, and even a
+/// device-input runtime keeps refusing unplanned shapes. On CPU the host-input guard fires first
+/// (the device-input sealed-plan enforcement runs on hardware in `cuda_ep`); this regression pins
+/// the fail-closed construction on the exact configuration the stale-input hazard used to allow.
+#[test]
+fn dynamic_io_runtime_cuda_graph_single_lane_host_input_is_rejected_too() {
+    let env = Environment::new().expect("env");
+    let (mem, sess) = match mnist_session(&env) {
+        Some(v) => v,
+        None => {
+            eprintln!("skipping — mnist.onnx absent");
+            return;
+        },
+    };
+
+    let output_mem = mem.try_clone_descriptor().expect("output mem");
+    let err = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
+        sess,
+        mem,
+        output_mem,
+        1,
+        DynamicIoOptions::new(1).with_cuda_graph(true),
+    )
+    .expect_err("single-lane host-input cuda_graph must also be rejected");
+    assert!(
+        err.to_string().contains("device-resident inputs"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -1109,11 +2276,11 @@ fn run_with_options_config() {
             return;
         },
     };
-    let mut opts = RunOptions::new().expect("run options");
-    opts.set_log_severity(LoggingLevel::Fatal)
-        .expect("severity")
-        .set_run_tag("zrt-smoke")
-        .expect("run tag");
+    let opts = RunOptions::new()
+        .with_log_severity(LoggingLevel::Fatal)
+        .with_run_tag("zrt-smoke")
+        .freeze()
+        .expect("run options");
 
     let in_buf = vec![0.0_f32; 784];
     let input = Tensor::from_buffer(&in_buf, &[1, 1, 28, 28], &mem).expect("input");
@@ -1138,7 +2305,7 @@ fn run_options_terminate_cancels() {
             return;
         },
     };
-    let opts = RunOptions::new().expect("run options");
+    let opts = RunOptions::new().freeze().expect("run options");
     opts.terminate().expect("terminate");
 
     let in_buf = vec![0.0_f32; 784];
@@ -1241,16 +2408,55 @@ fn owned_value_copy_convenience_copies_to_tensor_buffer() {
 }
 
 #[test]
-fn lane_buffer_policy_presets_are_stable() {
-    assert_eq!(LaneBufferPolicy::balanced(), LaneBufferPolicy::Auto);
-    assert_eq!(LaneBufferPolicy::latency(), LaneBufferPolicy::Prefaulted);
+fn release_captured_graph_is_safe_without_captured_graph() {
+    // The 1.27 SessionReleaseCapturedGraph wrapper must be safe to call on a session that has no
+    // captured CUDA graph (no CUDA EP / enable_cuda_graph). Empirically ORT treats releasing a
+    // non-existent graph as a no-op and returns Ok — the guarantee here is that the wrapper does not
+    // panic on a CPU session. (The positive path — releasing a real captured graph — is exercised by
+    // the CUDA test in tests/cuda_ep.rs.)
+    let env = Environment::new().expect("env");
+    let Some((_mem, sess)) = mnist_session(&env) else {
+        eprintln!("skipping release_captured_graph test — mnist.onnx absent");
+        return;
+    };
+    sess.release_captured_graph(1)
+        .expect("releasing a non-existent captured graph is a safe no-op (no panic)");
+}
+
+#[test]
+fn buffer_spec_presets_and_auto_thresholds_are_stable() {
+    assert_eq!(BufferSpec::AUTO, BufferSpec::auto());
+    assert_eq!(BufferSpec::LATENCY, BufferSpec::vec().prefault());
     assert_eq!(
-        LaneBufferPolicy::throughput_large(),
-        LaneBufferPolicy::HugePagePrefaulted
+        BufferSpec::THROUGHPUT_LARGE,
+        BufferSpec::aligned(2 << 20).hugepage().prefault()
     );
     assert_eq!(
-        LaneBufferPolicy::pinned_host_candidate(),
-        LaneBufferPolicy::HugePageMlockedPrefaulted
+        BufferSpec::PINNED_HOST,
+        BufferSpec::aligned(2 << 20).hugepage().prefault().mlock()
+    );
+    assert_eq!(BufferSpec::CUDA_PINNED, BufferSpec::cuda_pinned());
+
+    assert_eq!(BufferSpec::AUTO.resolve((1 << 20) - 1), BufferSpec::vec());
+    let aligned = BufferSpec::AUTO.resolve(1 << 20);
+    assert_eq!(aligned.storage(), BufferStorage::Aligned);
+    assert_eq!(aligned.alignment_bytes(), 4096);
+    assert!(aligned.is_prefaulted());
+    assert!(!aligned.uses_hugepages());
+    assert_eq!(BufferSpec::AUTO.resolve((2 << 20) - 1), aligned);
+    assert_eq!(
+        BufferSpec::AUTO.resolve(2 << 20),
+        BufferSpec::THROUGHPUT_LARGE
+    );
+    assert_eq!(
+        BufferSpec::vec().resolve(usize::MAX),
+        BufferSpec::vec(),
+        "explicit Vec must not be mistaken for Auto"
+    );
+    assert_eq!(
+        BufferSpec::LATENCY.resolve(usize::MAX),
+        BufferSpec::LATENCY,
+        "explicit modifiers must remain size-invariant"
     );
 }
 
@@ -1315,4 +2521,151 @@ fn allocator_create_and_allocate() {
     assert!(!buf.as_ptr().is_null(), "allocated buffer is non-null");
     // `buf` frees on drop (AllocatorFree); `alloc` releases on drop (ReleaseAllocator).
     eprintln!("Allocator::create + allocate(128) OK (ptr non-null, RAII frees)");
+}
+
+// ─── T1.6 Custom logger ───────────────────────────────────────────────────────
+
+#[test]
+fn environment_with_custom_logger_constructs() {
+    // CreateEnvWithCustomLogger + trampoline registration. A no-op closure; we only assert the
+    // Env constructs (and drops) without error — ORT accepted our function pointer + param.
+    let env = Environment::new_with_logger(LoggingLevel::Verbose, "zrt-logger-ctor", |_| {})
+        .expect("env with custom logger");
+    drop(env);
+    eprintln!("Environment::new_with_logger constructs + drops cleanly");
+}
+
+#[test]
+fn environment_with_logger_and_global_thread_pools_constructs() {
+    let tp = ThreadingOptions::new().expect("threading");
+    let env = Environment::new_with_logger_and_global_thread_pools(
+        LoggingLevel::Verbose,
+        "zrt-logger-tp",
+        |_| {},
+        tp,
+    )
+    .expect("env with logger + global thread pools");
+    drop(env);
+    eprintln!("Environment::new_with_logger_and_global_thread_pools constructs cleanly");
+}
+
+#[test]
+fn env_creation_options_builder_constructs_env() {
+    // CreateEnvWithOptions via the OrtEnvCreationOptions struct (verified repr(C) layout). Includes
+    // a logger + global thread pools + a config entry to exercise every struct field.
+    let mut cfg = st_zrt::KeyValuePairs::new().expect("kvps");
+    cfg.add("ep_factory.dummy.key", "v").expect("add cfg");
+    let opts = EnvCreationOptions::new(LoggingLevel::Warning, "zrt-opts")
+        .with_logger(|_| {})
+        .with_thread_pools(ThreadingOptions::new().expect("threading"))
+        .with_config_entries(cfg);
+    let env = Environment::new_with_options(opts).expect("env via CreateEnvWithOptions");
+    drop(env);
+    eprintln!("EnvCreationOptions builder → CreateEnvWithOptions constructs cleanly");
+}
+
+#[test]
+fn environment_set_log_level_round_trips() {
+    // UpdateEnvWithCustomLogLevel.
+    let env = Environment::new().expect("env");
+    env.set_log_level(LoggingLevel::Error).expect("set Error");
+    env.set_log_level(LoggingLevel::Verbose)
+        .expect("set Verbose");
+    eprintln!("Environment::set_log_level round-trips cleanly");
+}
+
+#[test]
+fn environment_custom_logger_runs_session_without_ub() {
+    // Drive a real session through an Env whose logs route to a capturing closure. Asserts the env
+    // + session + run succeed with a custom logger attached — i.e. the trampoline is registered and
+    // ORT can invoke it concurrently without UB. ORT's verbose emission is process-global and not
+    // guaranteed across parallel tests, so the deterministic callback-fire proof (an explicit
+    // `Logger::log` in a kernel always routing through the env logger) lives in the custom-op tests.
+    let path = mnist_path();
+    if !path.exists() {
+        eprintln!("skipping environment_custom_logger_runs_session — mnist.onnx absent");
+        return;
+    }
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = captured.clone();
+    let env = Environment::new_with_logger(LoggingLevel::Verbose, "zrt-logger-capture", move |r| {
+        sink.lock().unwrap().push(r.message);
+    })
+    .expect("env");
+    let mem = MemoryInfo::cpu().expect("cpu mem");
+    let opts = SessionOptions::new().with_opt_level(GraphOptimizationLevel::All);
+    let sess = Session::new(&env, path.to_str().unwrap(), opts).expect("session");
+    let buf: Vec<f32> = vec![0.0; 28 * 28];
+    let input = Tensor::from_buffer(&buf, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut outputs).expect("run");
+    let n = captured.lock().unwrap().len();
+    eprintln!("environment_custom_logger_runs_session: run OK; captured {n} message(s)");
+}
+
+#[test]
+fn session_options_user_logging_function_is_applied() {
+    // SetUserLoggingFunction: attach a per-session logger at options-build time and confirm the
+    // session constructs + runs without error (the leaked callback stays valid for the run).
+    let path = mnist_path();
+    if !path.exists() {
+        eprintln!("skipping session_options_user_logging_function — mnist.onnx absent");
+        return;
+    }
+    let captured: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    let sink = captured.clone();
+    let mut opts = SessionOptions::new().with_opt_level(GraphOptimizationLevel::All);
+    opts.with_user_logging_function(move |_r: LogRecord| {
+        *sink.lock().unwrap() += 1;
+    })
+    .expect("set user logger");
+    let env = Environment::new().expect("env");
+    let sess = Session::new(&env, path.to_str().unwrap(), opts).expect("session");
+    let mem = MemoryInfo::cpu().expect("cpu mem");
+    let buf: Vec<f32> = vec![0.0; 28 * 28];
+    let input = Tensor::from_buffer(&buf, &[1, 1, 28, 28], &mem).expect("input");
+    let mut outputs: Vec<Option<OwnedValue>> = (0..sess.output_count()).map(|_| None).collect();
+    sess.run(&[&input], &mut outputs).expect("run");
+    let n = *captured.lock().unwrap();
+    eprintln!(
+        "session_options_user_logging_function: callback fired {n} time(s); session ran clean"
+    );
+}
+
+/// `Session::ep_graph_assignment_info` reaches the FFI and the full borrowed-view chain
+/// (`EpAssignedSubgraph` → `ep_name` + `nodes` → `EpAssignedNode` name/domain/operator_type) is
+/// sound. Exercises the introspection accessors without asserting a count (a CPU session may or
+/// may not report the CPU EP); the populated CUDA path is covered by the bench-c graph bench.
+#[cfg(feature = "ep")]
+#[test]
+fn session_ep_graph_assignment_info_is_sound() {
+    let path = mnist_path();
+    if !path.exists() {
+        eprintln!("skipping session_ep_graph_assignment_info — mnist.onnx absent");
+        return;
+    }
+    let env = Environment::new().expect("env");
+    // `ep_graph_assignment_info` only returns data when the session was created with this entry.
+    let opts = SessionOptions::new()
+        .with_config_entry("session.record_ep_graph_assignment_info", "1")
+        .expect("config entry");
+    let sess = Session::new(&env, path.to_str().unwrap(), opts).expect("session");
+    let info = sess.ep_graph_assignment_info().expect("assignment info");
+    eprintln!(
+        "session_ep_graph_assignment_info: {} assigned subgraph(s)",
+        info.len()
+    );
+    for sg in &info {
+        let ep = sg.ep_name().unwrap_or_default();
+        let nodes = sg.nodes().unwrap_or_default();
+        eprintln!("  subgraph ep={ep} nodes={}", nodes.len());
+        for n in nodes {
+            eprintln!(
+                "    node name={} domain={} op={}",
+                n.name().unwrap_or_default(),
+                n.domain().unwrap_or_default(),
+                n.operator_type().unwrap_or_default(),
+            );
+        }
+    }
 }

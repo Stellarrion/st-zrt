@@ -1,34 +1,72 @@
 //! st-zrt — Stellarion's zero-overhead Rust runtime over onnxruntime.
 //!
-//! Scope (locked, see `DESIGN.md`): the *runtime library* only. Kernels are reused,
+//! Scope (locked, see `docs/architecture.md`): the *runtime library* only. Kernels are reused,
 //! not written; a serving layer is a separate, later project. The win lives in the
 //! binding/session/memory/IO/scheduling layer — zero binding tax, zero-copy tensor
 //! I/O, pre-marshaled names, reused run options.
 //!
 //! This safe layer sits over [`st_zrt_sys`] — the exhaustive, **generated** FFI table
 //! (see `st-zrt-sys/src/generated.rs`, produced by `st-zrt-sys-codegen`).
+//!
+//! # Examples
+//!
+//! Load a model and run one inference on a caller-owned buffer. Marked `no_run` so it compiles
+//! against the real API (a doc-rot guard) without requiring a `model.onnx` on disk:
+//!
+//! ```no_run
+//! use st_zrt::{
+//!     Environment, GraphOptimizationLevel, MemoryInfo, OwnedValue, Session, SessionOptions, Tensor,
+//! };
+//!
+//! fn main() -> st_zrt::Result<()> {
+//!     let env = Environment::new()?;
+//!     let opts = SessionOptions::new().with_opt_level(GraphOptimizationLevel::All);
+//!     let session = Session::new(&env, "model.onnx", opts)?;
+//!     let mem = MemoryInfo::cpu()?;
+//!
+//!     let input_buf = vec![0.0_f32; 784];
+//!     let input = Tensor::from_buffer(&input_buf, &[1, 1, 28, 28], &mem)?;
+//!
+//!     let mut outputs: Vec<Option<OwnedValue>> =
+//!         (0..session.output_count()).map(|_| None).collect();
+//!     session.run(&[&input], &mut outputs)?;
+//!
+//!     let logits = outputs[0].as_ref().unwrap().as_slice::<f32>()?;
+//!     println!("{:?}", &logits[..3.min(logits.len())]);
+//!     Ok(())
+//! }
+//! ```
 
 pub use st_zrt_sys as sys;
 pub use sys::{
     AllocatorType, ElementType, ExecutionMode, ExecutionProviderDevicePolicy,
-    GraphOptimizationLevel, LoggingLevel, MemType, OrtErrorCode, SparseFormat, SparseIndicesFormat,
+    GraphOptimizationLevel, LoggingLevel, MemType, ORT_VERSION, OrtErrorCode,
+    ProfilingEventCategory, SUPPORTED_RUNTIME_LINES, SparseFormat, SparseIndicesFormat,
 };
 
 mod allocator;
 mod arena;
+mod compat;
+#[cfg(feature = "cuda")]
+mod cuda_rt;
 #[cfg(feature = "custom-ops")]
 mod custom_ops;
+mod diagnostics;
 mod element;
 mod environment;
 #[cfg(feature = "ep")]
 mod ep;
+#[cfg(feature = "model-editor")]
+mod ep_authoring;
 #[cfg(feature = "ep")]
 mod ep_device;
 mod error;
+mod hardware;
 mod initializer;
 #[cfg(feature = "model-editor")]
 mod interop;
 mod io_binding;
+mod lora;
 mod memory;
 mod metadata;
 #[cfg(feature = "model-editor")]
@@ -40,16 +78,33 @@ mod runtime;
 mod serde_support;
 mod session;
 mod session_options;
+pub mod shape_plan;
+mod spsc;
 mod tensor;
 mod threading;
 mod type_info;
 
-pub use allocator::{Allocation, Allocator, AllocatorStats, AllocatorStatsDelta};
+pub use allocator::{
+    Allocation, Allocator, AllocatorStats, AllocatorStatsDelta, KeyValuePairs, KeyValuePairsView,
+};
 pub use arena::{ArenaCfg, ArenaExtendStrategy};
+#[cfg(feature = "ep")]
+pub use compat::compatibility_for_ep_devices;
+pub use compat::{
+    CompiledModelCompatibility, compatibility_info_from_bytes, compatibility_info_from_path,
+};
+#[cfg(feature = "cuda")]
+pub use cuda_rt::{
+    CompletionEventRef, CudaCompletionPoller, CudaEvent, CudaStream, PinnedBuffer, device_count,
+    memcpy_async_d2d, stream_wait_event,
+};
 #[cfg(feature = "custom-ops")]
 pub use custom_ops::{
-    CustomOp, CustomOpDomain, KernelContext, KernelInfo, Op, OpAttr, OpIoSpec, OwnedKernelInfo,
-    ShapeInferContext,
+    CustomOp, CustomOpDomain, KernelContext, KernelInfo, Logger, Op, OpAttr, OpIoSpec,
+    OwnedKernelInfo, ShapeInferContext,
+};
+pub use diagnostics::{
+    available_providers, build_info, current_gpu_device_id, set_current_gpu_device_id,
 };
 // The generic trampolines the `#[macro_export] custom_op!` macro names via
 // `$crate::__priv`. `#[doc(hidden)]` keeps them out of the public surface.
@@ -57,17 +112,30 @@ pub use custom_ops::{
 #[doc(hidden)]
 pub use custom_ops::__priv;
 pub use element::TensorElement;
-pub use environment::Environment;
-#[cfg(feature = "ep")]
-pub use ep::{
-    CannOptions, CudaArenaExtendStrategy, CudaCudnnConvAlgoSearch, CudaOptions, CudaPreset,
-    CudaProviderOptions, DnnlOptions, EpProvider, MigraphxOptions, OpenvinoOptions, RocmOptions,
-    TensorRtOptions,
+pub use environment::{
+    EnvCreationOptions, Environment, LanguageProjection, LogRecord, ThreadPoolCallbacksConfig,
 };
 #[cfg(feature = "ep")]
-pub use ep_device::{EpDevice, get_ep_devices};
+pub use ep::{
+    CannOptions, CudaArenaExtendStrategy, CudaConfig, CudaCudnnConvAlgoSearch, CudaOptions,
+    CudaProviderOptions, DeviceInputPolicy, DnnlOptions, EpProvider, MigraphxOptions,
+    OpenvinoOptions, RocmOptions, TensorRtOptions,
+};
+#[cfg(feature = "model-editor")]
+pub use ep_authoring::{
+    EpAuthor, EpFactoryAuthor, EpFactoryInstance, EpGraphRef, EpGraphSupportInfoRef, EpInstance,
+    KernelDef, KernelDefBuilder, OpSchema, OpSchemaTypeConstraint, OwnedEpDevice,
+    OwnedHardwareDevice, ProfilingEvent, ep_factory_instance, ep_factory_vtable, ep_instance,
+    ep_vtable,
+};
+#[cfg(feature = "ep")]
+pub use ep_device::{EpAssignedNode, EpAssignedSubgraph, EpDevice, SyncStream, get_ep_devices};
 pub use error::{Error, Result};
-pub use initializer::OwnedInitializer;
+pub use hardware::{
+    DeviceEpIncompatibilityDetails, HardwareDevice, hardware_device_ep_incompatibility_details,
+    hardware_devices, num_hardware_devices,
+};
+pub use initializer::{ExternalInitializerInfo, OwnedInitializer};
 #[cfg(feature = "model-editor")]
 pub use interop::{
     ExternalMemoryDescriptor, ExternalMemoryHandle, ExternalMemoryHandleType,
@@ -76,7 +144,11 @@ pub use interop::{
     deinit_graphics_interop_for_ep_device, init_graphics_interop_for_ep_device,
 };
 pub use io_binding::{IoBinding, OutputValue};
-pub use memory::{MemoryDeviceSnapshot, MemoryInfo, MemoryInfoSnapshot};
+pub use lora::LoraAdapter;
+pub use memory::{
+    DeviceMemoryType, MemoryClass, MemoryDeviceSnapshot, MemoryInfo, MemoryInfoDeviceType,
+    MemoryInfoSnapshot,
+};
 pub use metadata::ModelMetadata;
 #[cfg(feature = "model-editor")]
 pub use model_editor::{
@@ -84,38 +156,61 @@ pub use model_editor::{
     ep_api, interop_api, model_editor_api,
 };
 pub use prepacked::PrepackedWeightsContainer;
-pub use run_options::RunOptions;
+pub use run_options::{MaterializedRunOptions, RunOptions};
 pub use runtime::{
-    DynamicIoOptions, DynamicIoRuntime, Lane, LaneHotPathAudit, Runtime, RuntimeMode, ShapeBucket,
-    ShapeKey, ShapeSpec, StaticIoLane, StaticIoRuntime, TensorBufferAudit,
+    CompletionStatus, DynamicIoOptions, DynamicIoRuntime, InFlightRun, Lane, LaneEnqueueError,
+    LaneHotPathAudit, OwnedDynamicIoRun, PreparedBucketId, Runtime, RuntimeMode, ServingLane,
+    ServingLanePool, ServingLanePoolGuard, ShapeBucket, ShapeKey, ShapeSpec, StaticIoRuntime,
+    TensorBufferAudit,
 };
+#[cfg(feature = "cuda")]
+pub use runtime::{GpuChainEnqueueError, GpuChainedDynamicIoRun};
 pub use session::{
     AllocatedOutputTensorIoLane, AllocatedTensorIoLane, DeviceOutputTensorIoLane,
-    ExecutionProviderDeviceSnapshot, IoDirection, IoPlacement, LaneBufferPolicy,
-    LaneRunAllocatorStats, PreparedIoBinding, PreparedRun, RunFuture, Session, StaticTensorIoLane,
-    TensorIoLane,
+    ExecutionProviderDeviceSnapshot, IoDirection, IoPlacement, LaneRunAllocatorStats,
+    PreparedIoBinding, PreparedRun, RunFuture, Session, StaticTensorIoLane, TensorIoLane,
 };
 pub use session_options::{ArenaState, MemPatternState, SessionOptions};
+pub use shape_plan::{
+    CanonicalShape, ClassifyError, FallbackPolicy, OutputPolicy, ServingShapePlan,
+    ServingShapePlanBuilder, ShapeId, ShapePlanError,
+};
+pub use spsc::{
+    SendError as SpscSendError, SpscReceiver, SpscSender, TryRecvError as SpscTryRecvError,
+    TrySendError as SpscTrySendError, bounded_spsc, bounded_spsc_with_spins,
+};
 pub use tensor::{
-    AllocatedTensor, DeviceValue, MmapTensorOptions, OwnedValue, RunInput, SparseTensor,
-    StringTensor, Tensor, TensorBuffer, TensorView,
+    AllocatedTensor, BufferSpec, BufferStorage, DeviceValue, MmapTensorOptions, OwnedValue,
+    RunInput, SparseTensor, StringTensor, Tensor, TensorBuffer, TensorView,
 };
 pub use threading::{ThreadManager, ThreadingOptions};
-pub use type_info::TensorTypeAndShapeInfo;
+pub use type_info::{
+    MapTypeInfo, OptionalTypeInfo, RuntimeTypeInfo, SequenceTypeInfo, TensorTypeAndShapeInfo,
+    TensorTypeAndShapeInfoView,
+};
 
 // ─── crate-private helpers shared across modules ─────────────────────────────
-/// Borrow the live `Api` function-pointer table (a process global; lives forever).
+/// Cached reference to the live `Api` function-pointer table (a process global).
+///
+/// Resolved once via `sys::api()` and stored in a `OnceLock`. After initialization,
+/// `api()` is a single atomic load — no `OrtGetApiBase`/`GetApi` C calls on the hot path.
+static API: std::sync::OnceLock<&'static sys::Api> = std::sync::OnceLock::new();
+
+/// Borrow the cached live `Api` function-pointer table.
 #[inline]
 pub(crate) fn api() -> &'static sys::Api {
-    // SAFETY: the table is a process-global returned by the engine.
-    unsafe { &*sys::api() }
+    API.get_or_init(|| {
+        // SAFETY: ORT documents its API table as process-global; st-zrt-sys links the shared
+        // library for the process lifetime and does not expose an unload operation.
+        unsafe { &*sys::api() }
+    })
 }
 
 /// Turn a raw `OrtStatus*` into `Result<()>`: null ⇒ Ok; else Err (code+message),
-/// with the status released.
+/// with the status released. Uses the cached `Api` reference — no table re-discovery.
 #[inline]
 pub(crate) fn check(status: sys::StatusPtr) -> Result<()> {
-    unsafe { sys::status_to_result(&*sys::api(), status).map_err(Error::from) }
+    unsafe { sys::status_to_result(api(), status).map_err(Error::from) }
 }
 
 /// Copy a non-null C string into an owned UTF-8 `String`.
@@ -188,6 +283,27 @@ pub(crate) fn tensor_byte_len(elem_type: sys::ElementType, count: usize) -> Resu
     count
         .checked_mul(element_size(elem_type))
         .ok_or_else(|| Error::new(-1, "tensor byte length overflows usize"))
+}
+
+/// Test-only process-wide mutex serializing `Environment` creation in this crate's unit tests.
+///
+/// `CreateEnv` constructs ORT's default `LoggingManager`, and ORT enforces "only one instance of
+/// LoggingManager created with InstanceType::Default can exist at any point in time". Cargo runs a
+/// binary's tests on a thread pool, so concurrent default-`Environment` creations across test
+/// modules race that singleton and fail intermittently with
+/// `logging.cc:158 ... InstanceType::Default`. ORT builds that default-instance manager for both
+/// `Environment::new` and `Environment::new_with_logger`, so every unit test that creates any
+/// `Environment` acquires this lock for its whole body. (`release-check.sh` sets
+/// `RUST_TEST_THREADS=1` for the same reason; this keeps plain `cargo test` reliable.)
+#[cfg(test)]
+pub(crate) static TEST_ENV_CREATION_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquire [`TEST_ENV_CREATION_MUTEX`]; keep the guard for the test's whole body.
+#[cfg(test)]
+pub(crate) fn lock_default_env_creation() -> std::sync::MutexGuard<'static, ()> {
+    TEST_ENV_CREATION_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]

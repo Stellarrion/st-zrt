@@ -2,7 +2,7 @@ use std::error::Error;
 use std::time::Instant;
 
 #[cfg(feature = "ep")]
-use st_zrt::{CudaPreset, EpProvider};
+use st_zrt::{CudaConfig, EpProvider};
 use st_zrt::{
     Environment, ExecutionMode, GraphOptimizationLevel, LoggingLevel, MemoryInfo, SessionOptions,
     ThreadingOptions,
@@ -38,7 +38,7 @@ fn input_fill(model: &str, buf: &mut [f32]) {
             for (i, v) in buf.iter_mut().enumerate() {
                 *v = ((i % 251) as f32 - 125.0) / 128.0;
             }
-        }
+        },
         _ => buf.fill(0.0),
     }
 }
@@ -193,12 +193,14 @@ fn apply_ep(opts: SessionOptions, cfg: &ProbeConfig) -> Result<SessionOptions, B
             "dnnl" => opts.with_execution_provider(EpProvider::Dnnl, &[])?,
             "openvino" | "openvino_cpu" => {
                 opts.with_execution_provider(EpProvider::OpenVinoV2, &[("device_type", "CPU")])?
-            }
+            },
             "openvino_gpu" => {
                 opts.with_execution_provider(EpProvider::OpenVinoV2, &[("device_type", "GPU")])?
-            }
-            "cuda" => opts.with_cuda_preset(CudaPreset::performance(device_id))?,
-            "cuda_graph" => opts.with_cuda_preset(CudaPreset::cuda_graph(device_id))?,
+            },
+            "cuda" => opts.with_cuda(CudaConfig::performance(device_id))?,
+            "cuda_graph" => {
+                opts.with_cuda(CudaConfig::performance(device_id).with_cuda_graph(true))?
+            },
             "tensorrt" | "trt" => opts.with_execution_provider(
                 EpProvider::TensorRt,
                 &[("device_id", &device_id.to_string())],
@@ -303,7 +305,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     cfg.ep, cfg.execution_mode_label, err
                 );
                 continue;
-            }
+            },
         };
         let session = match st_zrt::Session::new(&env, model_path, opts) {
             Ok(session) => session,
@@ -313,7 +315,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     cfg.ep, cfg.execution_mode_label, err
                 );
                 continue;
-            }
+            },
         };
 
         let known = known_batch_shapes(&model_name, batch);

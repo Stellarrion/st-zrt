@@ -24,7 +24,7 @@
 use crate::allocator::Allocator;
 use crate::memory::MemoryInfo;
 use crate::session_options::SessionOptions;
-use crate::tensor::TensorView;
+use crate::tensor::{OwnedValue, TensorView};
 use crate::{Error, Result, api, check, sys};
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::marker::PhantomData;
@@ -221,9 +221,9 @@ unsafe impl Sync for OpAttr {}
 /// drop. **Must outlive every session built from options it was attached to** (ORT retains
 /// the domain; it does not copy it).
 ///
-/// Registering an op means adding an `OrtCustomOp` vtable struct. The ergonomic vtable
-/// builder is a separate milestone; for now use [`CustomOpDomain::add_raw`] with a
-/// hand-built `*const OrtCustomOp` (cast to `*const CustomOpHandle`).
+/// Register an op built by the [`custom_op!`](crate::custom_op) macro with
+/// [`CustomOpDomain::add_op`]. [`CustomOpDomain::add_raw`] remains available as the unsafe escape
+/// hatch for a hand-built `*const OrtCustomOp` (cast to `*const CustomOpHandle`).
 pub struct CustomOpDomain {
     ptr: *mut sys::CustomOpDomainHandle,
 }
@@ -375,11 +375,9 @@ pub trait CustomOp: Sized + Send + 'static {
     /// return a reference to a `static` array (see [`CustomOp::inputs`]).
     fn outputs() -> &'static [OpIoSpec];
 
-    /// Execution-provider type; `None` ⇒ the CPU EP (this milestone is CPU-only — returning a
-    /// provider string here is not yet wired through the vtable).
-    fn execution_provider_type() -> Option<&'static str> {
-        None
-    }
+    // Custom operators currently target the CPU EP. The vtable reports `null` from
+    // `get_execution_provider_type`; a provider-selection hook belongs here only when it is wired
+    // through rather than accepted and ignored.
     /// Minimum arity of a variadic input (default 1; only meaningful if the last input is
     /// variadic).
     fn variadic_input_min_arity() -> std::os::raw::c_int {
@@ -397,6 +395,64 @@ pub trait CustomOp: Sized + Send + 'static {
     }
 }
 
+// ─── Logger (borrowed) ────────────────────────────────────────────────────────
+
+/// Borrowed access to an `OrtLogger*` obtained from a [`KernelInfo`] or [`KernelContext`] during a
+/// kernel call (`KernelInfo_GetLogger` / `KernelContext_GetLogger`). Engine-owned — never released;
+/// valid only for the duration of the kernel callback that produced it.
+pub struct Logger<'a> {
+    ptr: *const sys::LoggerHandle,
+    _life: PhantomData<&'a ()>,
+}
+
+impl<'a> Logger<'a> {
+    /// Wrap a raw `OrtLogger*`; `None` if ORT handed back null (no logger attached).
+    pub(crate) fn from_ptr(ptr: *const sys::LoggerHandle) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(Self {
+                ptr,
+                _life: PhantomData,
+            })
+        }
+    }
+
+    /// The logger's severity threshold (`Logger_GetLoggingSeverityLevel`). Messages below this are
+    /// not emitted.
+    pub fn severity_level(&self) -> Result<sys::LoggingLevel> {
+        let mut out: sys::LoggingLevel = sys::LoggingLevel::Verbose;
+        check(unsafe { api().logger__get_logging_severity_level()(self.ptr, &mut out) })?;
+        Ok(out)
+    }
+
+    /// Emit `message` at `level` through this logger (`Logger_LogMessage`). `file`/`func` are the
+    /// source location (commonly `file!()`/`module_path!()`); `line` is the source line. ORT drops
+    /// the message if `level` is below the logger's threshold.
+    pub fn log(
+        &self, level: sys::LoggingLevel, message: &str, file: &str, line: c_int, func: &str,
+    ) -> Result<()> {
+        let cmsg =
+            CString::new(message).map_err(|_| Error::new(-1, "log message contains a NUL byte"))?;
+        let cfile =
+            CString::new(file).map_err(|_| Error::new(-1, "log file path contains a NUL byte"))?;
+        let cfunc =
+            CString::new(func).map_err(|_| Error::new(-1, "log func name contains a NUL byte"))?;
+        check(unsafe {
+            api().logger__log_message()(
+                self.ptr,
+                level,
+                cmsg.as_ptr(),
+                cfile.as_ptr(),
+                line,
+                cfunc.as_ptr(),
+            )
+        })
+    }
+}
+unsafe impl Send for Logger<'_> {}
+unsafe impl Sync for Logger<'_> {}
+
 // ─── KernelInfo (borrowed) + OwnedKernelInfo (owning) ─────────────────────────
 
 /// Borrowed access to the `OrtKernelInfo*` ORT passes to a kernel's `Create` callback:
@@ -405,6 +461,36 @@ pub trait CustomOp: Sized + Send + 'static {
 pub struct KernelInfo<'a> {
     ptr: *const sys::KernelInfoHandle,
     _life: PhantomData<&'a ()>,
+}
+
+/// Borrowed `OrtAllocator*` exposed to a custom-op callback. The allocator is owned by ORT and
+/// must not be released by user code.
+pub struct BorrowedAllocator<'a> {
+    ptr: *mut sys::AllocatorHandle,
+    _life: PhantomData<&'a ()>,
+}
+
+impl std::fmt::Debug for BorrowedAllocator<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BorrowedAllocator")
+            .field("ptr", &self.ptr)
+            .finish()
+    }
+}
+
+impl BorrowedAllocator<'_> {
+    /// Raw borrowed handle for FFI calls that require `OrtAllocator*`. Do not release it.
+    pub fn as_ptr(&self) -> *mut sys::AllocatorHandle {
+        self.ptr
+    }
+}
+
+impl std::fmt::Debug for KernelInfo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KernelInfo")
+            .field("ptr", &self.ptr)
+            .finish()
+    }
 }
 
 impl<'a> KernelInfo<'a> {
@@ -452,18 +538,20 @@ impl<'a> KernelInfo<'a> {
         }
     }
 
-    /// Owning `OrtTypeInfo*` for input `index` — release with `ReleaseTypeInfo` when done.
-    pub fn input_type_info(&self, index: usize) -> Result<*mut sys::TypeInfoHandle> {
+    /// Owning type info for input `index`.
+    pub fn input_type_info(&self, index: usize) -> Result<crate::RuntimeTypeInfo> {
         let mut out: *mut sys::TypeInfoHandle = ptr::null_mut();
         check(unsafe { api().kernel_info__get_input_type_info()(self.ptr, index, &mut out) })?;
-        crate::ensure_non_null(out, "kernel input type info")
+        let out = crate::ensure_non_null(out, "kernel input type info")?;
+        Ok(unsafe { crate::RuntimeTypeInfo::from_owning(out) })
     }
 
-    /// Owning `OrtTypeInfo*` for output `index` — release with `ReleaseTypeInfo` when done.
-    pub fn output_type_info(&self, index: usize) -> Result<*mut sys::TypeInfoHandle> {
+    /// Owning type info for output `index`.
+    pub fn output_type_info(&self, index: usize) -> Result<crate::RuntimeTypeInfo> {
         let mut out: *mut sys::TypeInfoHandle = ptr::null_mut();
         check(unsafe { api().kernel_info__get_output_type_info()(self.ptr, index, &mut out) })?;
-        crate::ensure_non_null(out, "kernel output type info")
+        let out = crate::ensure_non_null(out, "kernel output type info")?;
+        Ok(unsafe { crate::RuntimeTypeInfo::from_owning(out) })
     }
 
     /// The node's name.
@@ -549,9 +637,65 @@ impl<'a> KernelInfo<'a> {
         }
     }
 
-    /// Owning `OrtValue*` for a tensor attribute `name`, allocated via `allocator` —
-    /// release with `ReleaseValue` when done.
-    pub fn attr_tensor(&self, name: &str, allocator: &Allocator) -> Result<*mut sys::ValueHandle> {
+    /// string-array attribute `name` (`KernelInfoGetAttributeArray_string`). Engine-allocates an
+    /// array of `count` C strings via the default allocator; each string and the array are freed
+    /// here. Missing/invalid → `Err`.
+    pub fn attr_strings(&self, name: &str) -> Result<Vec<String>> {
+        let name = cstring(name)?;
+        let alloc = Allocator::get_default()?;
+        let mut arr: *mut *mut c_char = ptr::null_mut();
+        let mut size: usize = 0;
+        let status = check(unsafe {
+            api().kernel_info_get_attribute_array_string()(
+                self.ptr,
+                name.as_ptr(),
+                alloc.alloc_handle(),
+                &mut arr,
+                &mut size,
+            )
+        });
+        let result = (|| -> Result<Vec<String>> {
+            status?;
+            let mut out = Vec::with_capacity(size);
+            if size != 0 && !arr.is_null() {
+                for i in 0..size {
+                    let s = unsafe { *arr.add(i) };
+                    out.push(if s.is_null() {
+                        String::new()
+                    } else {
+                        unsafe { crate::cstr_to_string(s, "kernel-info string attribute") }?
+                    });
+                }
+            }
+            Ok(out)
+        })();
+        // Free each string + the array (best-effort); the engine allocated both via `alloc`.
+        if !arr.is_null() {
+            for i in 0..size {
+                let s = unsafe { *arr.add(i) };
+                if !s.is_null() {
+                    let _ = unsafe { alloc.free(s as *mut c_void) };
+                }
+            }
+            let _ = unsafe { alloc.free(arr as *mut c_void) };
+        }
+        result
+    }
+
+    /// Snapshot this kernel's config entries as an owning [`crate::KeyValuePairs`]
+    /// (`KernelInfo_GetConfigEntries`). Empty when there are none.
+    pub fn config_entries(&self) -> Result<crate::KeyValuePairs> {
+        let mut kvps: *mut sys::KeyValuePairsHandle = ptr::null_mut();
+        check(unsafe { api().kernel_info__get_config_entries()(self.ptr, &mut kvps) })?;
+        if kvps.is_null() {
+            return crate::KeyValuePairs::new();
+        }
+        // SAFETY: `kvps` is a freshly-allocated owning handle from ORT.
+        Ok(unsafe { crate::KeyValuePairs::from_handle(kvps) })
+    }
+
+    /// Owning tensor attribute `name`, allocated via `allocator`.
+    pub fn attr_tensor(&self, name: &str, allocator: &Allocator) -> Result<OwnedValue> {
         let name = cstring(name)?;
         let mut out: *mut sys::ValueHandle = ptr::null_mut();
         check(unsafe {
@@ -562,32 +706,40 @@ impl<'a> KernelInfo<'a> {
                 &mut out,
             )
         })?;
-        Ok(out)
+        OwnedValue::from_introspect(out)
     }
 
-    /// `(is_constant, value)` for input `index`. When `is_constant` is true the returned
-    /// `OrtValue*` is the constant initializer (borrowed from the graph — do not release).
-    pub fn constant_input_tensor(&self, index: usize) -> Result<(bool, *const sys::ValueHandle)> {
+    /// Constant initializer tensor for input `index`, if the input is constant. The returned view
+    /// borrows the graph-owned value and must not be released.
+    pub fn constant_input_tensor(&self, index: usize) -> Result<Option<TensorView<'a>>> {
         let mut is_const: c_int = 0;
         let out: *const sys::ValueHandle = ptr::null();
         check(unsafe {
             api().kernel_info_get_constant_input_tensor()(self.ptr, index, &mut is_const, &out)
         })?;
-        Ok((is_const != 0, out))
+        Ok(if is_const != 0 && !out.is_null() {
+            Some(TensorView::uncached(out as *mut sys::ValueHandle))
+        } else {
+            None
+        })
     }
 
-    /// Borrowed `OrtLogger*` for this node (do not release).
-    pub fn logger(&self) -> Result<*const sys::LoggerHandle> {
+    /// Borrowed [`Logger`] for this node, if ORT attached one (do not release).
+    pub fn logger(&self) -> Result<Option<Logger<'a>>> {
         let out: *const sys::LoggerHandle = ptr::null();
         check(unsafe { api().kernel_info__get_logger()(self.ptr, &out) })?;
-        Ok(out)
+        Ok(Logger::from_ptr(out))
     }
 
-    /// Borrowed `OrtAllocator*` for `mem_type` (do not release).
-    pub fn allocator(&self, mem_type: sys::MemType) -> Result<*mut sys::AllocatorHandle> {
+    /// Borrowed allocator for `mem_type`.
+    pub fn allocator(&self, mem_type: sys::MemType) -> Result<BorrowedAllocator<'a>> {
         let mut out: *mut sys::AllocatorHandle = ptr::null_mut();
         check(unsafe { api().kernel_info_get_allocator()(self.ptr, mem_type, &mut out) })?;
-        crate::ensure_non_null(out, "kernel allocator")
+        let out = crate::ensure_non_null(out, "kernel allocator")?;
+        Ok(BorrowedAllocator {
+            ptr: out,
+            _life: PhantomData,
+        })
     }
 
     /// Make an independent owning copy of this info (`CopyKernelInfo`) — used to keep
@@ -604,6 +756,14 @@ impl<'a> KernelInfo<'a> {
 /// Released on drop. Use [`KernelInfo::to_owned`] to create one.
 pub struct OwnedKernelInfo {
     ptr: *mut sys::KernelInfoHandle,
+}
+
+impl std::fmt::Debug for OwnedKernelInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedKernelInfo")
+            .field("ptr", &self.ptr)
+            .finish()
+    }
 }
 
 impl OwnedKernelInfo {
@@ -638,6 +798,14 @@ unsafe impl Sync for OwnedKernelInfo {}
 pub struct KernelContext<'a> {
     ptr: *const sys::KernelContextHandle,
     _life: PhantomData<&'a ()>,
+}
+
+impl std::fmt::Debug for KernelContext<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KernelContext")
+            .field("ptr", &self.ptr)
+            .finish()
+    }
 }
 
 impl<'a> KernelContext<'a> {
@@ -675,10 +843,7 @@ impl<'a> KernelContext<'a> {
         Ok(if out.is_null() {
             None
         } else {
-            Some(TensorView {
-                value: out as *mut sys::ValueHandle,
-                _life: PhantomData,
-            })
+            Some(TensorView::uncached(out as *mut sys::ValueHandle))
         })
     }
 
@@ -716,18 +881,22 @@ impl<'a> KernelContext<'a> {
         f(slice)
     }
 
-    /// Borrowed `OrtLogger*` for this compute call (do not release).
-    pub fn logger(&self) -> Result<*const sys::LoggerHandle> {
+    /// Borrowed [`Logger`] for this compute call, if ORT attached one (do not release).
+    pub fn logger(&self) -> Result<Option<Logger<'a>>> {
         let out: *const sys::LoggerHandle = ptr::null();
         check(unsafe { api().kernel_context__get_logger()(self.ptr, &out) })?;
-        Ok(out)
+        Ok(Logger::from_ptr(out))
     }
 
-    /// Borrowed `OrtAllocator*` for `mem` (do not release).
-    pub fn allocator(&self, mem: &MemoryInfo) -> Result<*mut sys::AllocatorHandle> {
+    /// Borrowed allocator for `mem`.
+    pub fn allocator(&self, mem: &MemoryInfo) -> Result<BorrowedAllocator<'a>> {
         let mut out: *mut sys::AllocatorHandle = ptr::null_mut();
         check(unsafe { api().kernel_context__get_allocator()(self.ptr, mem.info, &mut out) })?;
-        crate::ensure_non_null(out, "kernel context allocator")
+        let out = crate::ensure_non_null(out, "kernel context allocator")?;
+        Ok(BorrowedAllocator {
+            ptr: out,
+            _life: PhantomData,
+        })
     }
 
     /// Engine-owned scratch buffer of `count_or_bytes` bytes for `mem`. The buffer is
@@ -1108,8 +1277,7 @@ pub mod __priv {
     pub unsafe extern "C" fn get_execution_provider_type<T: CustomOp>(
         _op: *const c_void,
     ) -> *const c_char {
-        // CPU-only in this milestone; the trait override is accepted but not yet wired through.
-        let _ = <T as CustomOp>::execution_provider_type();
+        // CPU-only milestone: ORT uses a null provider type for the CPU EP.
         ptr::null()
     }
     pub unsafe extern "C" fn get_variadic_input_min_arity<T: CustomOp>(

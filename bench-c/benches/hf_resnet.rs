@@ -4,7 +4,7 @@
 //! Input is deterministic synthetic image data; preprocessing is intentionally outside the
 //! benchmark so the measurement is runtime/session/tensor overhead plus model execution.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{GraphOptimizationLevel, SessionOptions, Tensor};
 use st_zrt_bench_c::models;
 

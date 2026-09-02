@@ -162,6 +162,33 @@ impl ValueInfo {
         let p = crate::ensure_non_null(p, "model-editor value info")?;
         Ok(Self { ptr: p })
     }
+
+    /// The value-info's name (`GetValueInfoName`). Borrowed from the engine; copied to a `String`.
+    pub fn name(&self) -> Result<String> {
+        let mut p: *const c_char = ptr::null();
+        check(unsafe {
+            api().get_value_info_name()(self.ptr, &mut p as *mut _ as *const *const c_char)
+        })?;
+        if p.is_null() {
+            return Ok(String::new());
+        }
+        unsafe { crate::cstr_to_string(p, "model-editor value-info name") }
+    }
+
+    /// The value-info's type kind, read from its (borrowed) type info (`GetValueInfoTypeInfo` +
+    /// `GetOnnxTypeFromTypeInfo`).
+    pub fn type_info_kind(&self) -> Result<sys::OnnxType> {
+        let mut ti: *const sys::TypeInfoHandle = ptr::null();
+        check(unsafe {
+            api().get_value_info_type_info()(
+                self.ptr,
+                &mut ti as *mut _ as *const *const sys::TypeInfoHandle,
+            )
+        })?;
+        let mut ty = sys::OnnxType::Unknown;
+        check(unsafe { api().get_onnx_type_from_type_info()(ti, &mut ty) })?;
+        Ok(ty)
+    }
 }
 impl Drop for ValueInfo {
     fn drop(&mut self) {
@@ -429,7 +456,7 @@ impl Model {
             "CompileApi",
             "CreateModelCompilationOptionsFromSessionOptions",
         )?;
-        let opts_handle = opts.build_handle()?;
+        let opts_handle = opts.build_handle_for_session()?;
         let mut copts: *mut sys::ModelCompilationOptionsHandle = ptr::null_mut();
         let build = check(unsafe {
             create_options(
@@ -541,7 +568,7 @@ impl ModelCompilationOptions {
             "CompileApi",
             "CreateModelCompilationOptionsFromSessionOptions",
         )?;
-        let opts_handle = opts.build_handle()?;
+        let opts_handle = opts.build_handle_for_session()?;
         let mut p: *mut sys::ModelCompilationOptionsHandle = ptr::null_mut();
         let r = check(unsafe {
             create_options(
@@ -695,5 +722,17 @@ mod tests {
         assert!(ep_api().is_some(), "EpApi missing");
         assert!(interop_api().is_some(), "InteropApi missing");
         eprintln!("all four sub-APIs available via the safe accessors");
+    }
+
+    /// GetValueInfoName + GetValueInfoTypeInfo round-trip on a freshly built value-info.
+    #[test]
+    fn value_info_name_and_type_kind_round_trip() {
+        let mut tsi = crate::TensorTypeAndShapeInfo::new().expect("tsi");
+        tsi.set_element_type(sys::ElementType::Float).expect("et");
+        tsi.set_dimensions(&[1]).expect("dims");
+        let ty = TypeInfo::tensor(&tsi).expect("tensor type-info");
+        let vi = ValueInfo::new("X", &ty).expect("value-info");
+        assert_eq!(vi.name().expect("name"), "X");
+        assert_eq!(vi.type_info_kind().expect("kind"), sys::OnnxType::Tensor);
     }
 }

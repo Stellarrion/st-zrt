@@ -1,7 +1,8 @@
 [package]
 name = "st-zrt-sys"
-# Version-mirrors libonnxruntime exactly (the "same version as official onnxruntime" rule).
-version = "1.27.0"
+# Major/minor mirror libonnxruntime; patch releases revision the Rust binding surface for the
+# same upstream ABI when an already-published binding must be extended.
+version = "1.27.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -10,7 +11,7 @@ repository.workspace = true
 publish = true
 links = "onnxruntime"
 build = "build.rs"
-description = "Hand-written FFI to onnxruntime (libonnxruntime). Stellarrion st-zrt: from-scratch, zrt-namespaced, no bindgen."
+description = "Raw ONNX Runtime 1.27 bindings (1.28.x runtime compatible) with verified native library acquisition for st-zrt."
 documentation = "https://docs.rs/st-zrt-sys"
 readme = "README.md"
 keywords = ["onnx", "onnxruntime", "ffi", "bindings"]
@@ -36,8 +37,8 @@ cuda = []
 [build-dependencies]
 # Pure-Rust download / verify / extract - no system curl, tar, or sha256sum. This is
 # what makes the build reproducible across Linux/macOS/Windows runners.
-ureq = "2.12"
-sha2 = "0.10"
+ureq = { version = "3.3", default-features = false, features = ["rustls"] }
+sha2 = "0.11"
 hex = "0.4"
 flate2 = "1"
 tar = "0.4"

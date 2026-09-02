@@ -62,21 +62,14 @@ fn session_options() -> SessionOptions {
 fn mmap_options() -> MmapTensorOptions {
     MmapTensorOptions {
         byte_offset: 0,
-        sequential: std::env::var("ZRT_MMAP_SEQUENTIAL")
-            .ok()
-            .as_deref()
-            != Some("0"),
+        sequential: std::env::var("ZRT_MMAP_SEQUENTIAL").ok().as_deref() != Some("0"),
         hugepage: std::env::var("ZRT_MMAP_HUGEPAGE").ok().as_deref() == Some("1"),
         locked: std::env::var("ZRT_MMAP_LOCKED").ok().as_deref() == Some("1"),
     }
 }
 
 fn run_session(
-    sess: &Session,
-    mem: &MemoryInfo,
-    n: usize,
-    warmups: usize,
-    iters: usize,
+    sess: &Session, mem: &MemoryInfo, n: usize, warmups: usize, iters: usize,
 ) -> st_zrt::Result<(Duration, Duration, f64)> {
     let x = vec![3.0_f32; n];
     let input = Tensor::from_buffer(&x, &[1, n as i64], mem)?;
@@ -85,7 +78,10 @@ fn run_session(
     let warmup_start = Instant::now();
     for _ in 0..warmups {
         sess.run(&[&input], &mut outputs)?;
-        let out = outputs[0].as_ref().expect("warmup output").as_slice::<f32>()?;
+        let out = outputs[0]
+            .as_ref()
+            .expect("warmup output")
+            .as_slice::<f32>()?;
         std::hint::black_box(out);
     }
     let warmup_time = warmup_start.elapsed();
@@ -131,17 +127,9 @@ struct Probe {
 impl Probe {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        mode: &'static str,
-        model: &str,
-        warmups: usize,
-        iters: usize,
-        sidecar_bytes: usize,
-        load_time: Duration,
-        warmup_time: Duration,
-        run_time: Duration,
-        start_rss: Rss,
-        loaded_rss: Rss,
-        checksum: f64,
+        mode: &'static str, model: &str, warmups: usize, iters: usize, sidecar_bytes: usize,
+        load_time: Duration, warmup_time: Duration, run_time: Duration, start_rss: Rss,
+        loaded_rss: Rss, checksum: f64,
     ) -> Self {
         let done = rss().unwrap_or(loaded_rss);
         Self {
@@ -217,7 +205,7 @@ fn bench(mode: &str, label: &str, warmups: usize, iters: usize) -> Result<Probe,
         let sess = match mode {
             "embedded" | "external" => {
                 Session::new(&env, model.to_str().unwrap(), session_options())?
-            }
+            },
             "vec" => {
                 let c = TensorBuffer::from_vec(vec![2.0_f32; n], &[1, n as i64], &mem)?;
                 let init = OwnedInitializer::tensor("C", c)?;
@@ -227,7 +215,7 @@ fn bench(mode: &str, label: &str, warmups: usize, iters: usize) -> Result<Probe,
                     session_options(),
                     vec![init],
                 )?
-            }
+            },
             "mmap" => {
                 let c = TensorBuffer::<f32>::from_mmap_file_with_options(
                     sidecar.as_ref().expect("sidecar"),
@@ -242,7 +230,7 @@ fn bench(mode: &str, label: &str, warmups: usize, iters: usize) -> Result<Probe,
                     session_options(),
                     vec![init],
                 )?
-            }
+            },
             other => return Err(format!("unsupported mode: {other}").into()),
         };
         Ok((env, mem, sess))

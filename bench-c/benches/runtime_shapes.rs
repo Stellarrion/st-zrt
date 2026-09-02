@@ -3,13 +3,12 @@
 //! These use MNIST because the model is tiny enough that wrapper dispatch, shape lookup, and
 //! binding choices are visible. The cached dynamic path should be close to static; the cold path
 //! intentionally includes bucket allocation and binding setup.
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{
-    DynamicIoOptions, DynamicIoRuntime, Environment, GraphOptimizationLevel, MemoryInfo,
-    Runtime, Session, SessionOptions, StaticIoRuntime,
+    DynamicIoOptions, DynamicIoRuntime, Environment, GraphOptimizationLevel, MemoryInfo, Runtime,
+    Session, SessionOptions, StaticIoRuntime,
 };
 use st_zrt_bench_c::models;
-use std::sync::Arc;
 
 const INPUT: [i64; 4] = [1, 1, 28, 28];
 const OUTPUT: [i64; 2] = [1, 10];
@@ -28,7 +27,7 @@ fn bench_homogeneous_runtime_direct(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
     let mut runtime =
-        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&INPUT], &[&OUTPUT], 1)
+        Runtime::<f32>::shared_session(sess, &mem, &[&INPUT], &[&OUTPUT], 1)
             .expect("runtime");
     runtime.prime(32).expect("prime");
 
@@ -44,9 +43,14 @@ fn bench_homogeneous_runtime_direct(c: &mut Criterion) {
 fn bench_static_io_direct(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        StaticIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), &mem, [&INPUT], [&OUTPUT], 1)
-            .expect("static runtime");
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        sess,
+        &mem,
+        [&INPUT],
+        [&OUTPUT],
+        1,
+    )
+    .expect("static runtime");
     runtime.prime(32).expect("prime");
 
     c.bench_function("runtime/static_io_direct", |b| {
@@ -61,9 +65,14 @@ fn bench_static_io_direct(c: &mut Criterion) {
 fn bench_static_io_direct_unsynchronized(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        StaticIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), &mem, [&INPUT], [&OUTPUT], 1)
-            .expect("static runtime");
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        sess,
+        &mem,
+        [&INPUT],
+        [&OUTPUT],
+        1,
+    )
+    .expect("static runtime");
     runtime.prime(32).expect("prime");
 
     c.bench_function("runtime/static_io_direct_unsynchronized", |b| {
@@ -78,9 +87,14 @@ fn bench_static_io_direct_unsynchronized(c: &mut Criterion) {
 fn bench_static_io_run_on(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        StaticIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), &mem, [&INPUT], [&OUTPUT], 1)
-            .expect("static runtime");
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        sess,
+        &mem,
+        [&INPUT],
+        [&OUTPUT],
+        1,
+    )
+    .expect("static runtime");
     runtime.prime(32).expect("prime");
 
     c.bench_function("runtime/static_io_run_on", |b| {
@@ -99,9 +113,14 @@ fn bench_static_io_run_on(c: &mut Criterion) {
 fn bench_static_io_run_on_unsynchronized(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        StaticIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), &mem, [&INPUT], [&OUTPUT], 1)
-            .expect("static runtime");
+    let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
+        sess,
+        &mem,
+        [&INPUT],
+        [&OUTPUT],
+        1,
+    )
+    .expect("static runtime");
     runtime.prime(32).expect("prime");
 
     c.bench_function("runtime/static_io_run_on_unsynchronized", |b| {
@@ -121,7 +140,7 @@ fn bench_static_io_rebind_run(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
     let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&INPUT],
         [&OUTPUT],
@@ -144,7 +163,7 @@ fn bench_static_io_rebind_run_unsynchronized(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
     let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&INPUT],
         [&OUTPUT],
@@ -167,7 +186,7 @@ fn bench_static_io_dispatch_only(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
     let mut runtime = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&INPUT],
         [&OUTPUT],
@@ -190,9 +209,8 @@ fn bench_static_io_dispatch_only(c: &mut Criterion) {
 fn bench_dynamic_cached_run_on(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 1)
-            .expect("dynamic runtime");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
+        .expect("dynamic runtime");
     runtime
         .prime_bucket([&INPUT], [&OUTPUT], 32)
         .expect("prime bucket");
@@ -213,9 +231,8 @@ fn bench_dynamic_cached_run_on(c: &mut Criterion) {
 fn bench_dynamic_cached_run_on_unsynchronized(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 1)
-            .expect("dynamic runtime");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
+        .expect("dynamic runtime");
     runtime
         .prime_bucket([&INPUT], [&OUTPUT], 32)
         .expect("prime bucket");
@@ -238,7 +255,7 @@ fn bench_dynamic_cached_rebind_run_on(c: &mut Criterion) {
     let (sess, mem) = session(&env);
     let output_mem = mem.try_clone_descriptor().expect("output memory");
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
-        Arc::new(sess),
+        sess,
         mem,
         output_mem,
         1,
@@ -267,7 +284,7 @@ fn bench_dynamic_cached_rebind_run_on_unsynchronized(c: &mut Criterion) {
     let (sess, mem) = session(&env);
     let output_mem = mem.try_clone_descriptor().expect("output memory");
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
-        Arc::new(sess),
+        sess,
         mem,
         output_mem,
         1,
@@ -294,7 +311,7 @@ fn bench_dynamic_cached_rebind_run_on_unsynchronized(c: &mut Criterion) {
 fn bench_dynamic_cached_dispatch_only(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 1)
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
         .expect("dynamic runtime");
     runtime
         .prime_bucket([&INPUT], [&OUTPUT], 1)
@@ -315,9 +332,8 @@ fn bench_dynamic_cached_dispatch_only(c: &mut Criterion) {
 fn bench_dynamic_cached_bucket_direct(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime =
-        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 1)
-            .expect("dynamic runtime");
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
+        .expect("dynamic runtime");
     runtime
         .prime_bucket([&INPUT], [&OUTPUT], 32)
         .expect("prime bucket");
@@ -335,7 +351,7 @@ fn bench_dynamic_cached_bucket_direct(c: &mut Criterion) {
 fn bench_dynamic_cached_bucket_dispatch_only(c: &mut Criterion) {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
-    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 1)
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1)
         .expect("dynamic runtime");
     runtime
         .prime_bucket([&INPUT], [&OUTPUT], 1)
@@ -355,7 +371,7 @@ fn bench_dynamic_lookup_16_buckets(c: &mut Criterion) {
     let (sess, mem) = session(&env);
     let output_mem = mem.try_clone_descriptor().expect("output memory");
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
-        Arc::new(sess),
+        sess,
         mem,
         output_mem,
         1,
@@ -387,7 +403,7 @@ fn bench_dynamic_cold_create_and_run(c: &mut Criterion) {
     let (sess, mem) = session(&env);
     let output_mem = mem.try_clone_descriptor().expect("output memory");
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
-        Arc::new(sess),
+        sess,
         mem,
         output_mem,
         1,
@@ -397,7 +413,7 @@ fn bench_dynamic_cold_create_and_run(c: &mut Criterion) {
 
     c.bench_function("runtime/dynamic_cold_create_run", |b| {
         b.iter(|| {
-            runtime.clear_buckets();
+            runtime.clear_buckets().expect("clear buckets");
             runtime
                 .run_on([&INPUT], [&OUTPUT], 0, |lane| {
                     lane.run()?;
@@ -414,7 +430,7 @@ fn bench_dynamic_cold_create_only(c: &mut Criterion) {
     let (sess, mem) = session(&env);
     let output_mem = mem.try_clone_descriptor().expect("output memory");
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
-        Arc::new(sess),
+        sess,
         mem,
         output_mem,
         1,
@@ -424,11 +440,15 @@ fn bench_dynamic_cold_create_only(c: &mut Criterion) {
 
     c.bench_function("runtime/dynamic_cold_create_only", |b| {
         b.iter(|| {
-            runtime.clear_buckets();
+            runtime.clear_buckets().expect("clear buckets");
             let bucket = runtime
                 .get_or_create_bucket([&INPUT], [&OUTPUT])
                 .expect("bucket");
-            black_box(bucket.lane(0).expect("lane").outputs()[0].as_slice().as_ptr());
+            black_box(
+                bucket.lane(0).expect("lane").outputs().expect("host outputs")[0]
+                    .as_slice()
+                    .as_ptr(),
+            );
         });
     });
 }

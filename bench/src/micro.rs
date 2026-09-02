@@ -1,4 +1,4 @@
-//! Micro-benchmarks isolating single anti-patterns (task #7).
+//! Micro-benchmarks isolating single anti-patterns.
 //!
 //! `copy_tensor_f32` isolates **O3** — the cost of `Tensor::from_array` (copy
 //! into ORT's allocator) as a function of tensor size. No model required.

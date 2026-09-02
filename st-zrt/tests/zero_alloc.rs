@@ -1,9 +1,9 @@
 use st_zrt::{
-    DynamicIoOptions, DynamicIoRuntime, Environment, GraphOptimizationLevel, MemoryInfo,
-    OutputValue, Runtime, Session, SessionOptions, StaticIoRuntime, Tensor, TensorBuffer,
+    BufferSpec, DynamicIoOptions, DynamicIoRuntime, Environment, GraphOptimizationLevel,
+    MemoryInfo, OutputValue, Runtime, Session, SessionOptions, StaticIoRuntime, Tensor,
+    TensorBuffer,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -202,6 +202,16 @@ fn output_value_is_pointer_identity_zero_copy() {
         expected_ptr,
         "OutputValue copied instead of pointing at caller output"
     );
+    let allocs = measured_allocs(|| {
+        for _ in 0..32 {
+            let slice = output.as_slice::<f32>().expect("cached output slice");
+            assert_eq!(slice.as_ptr(), expected_ptr);
+        }
+    });
+    assert_eq!(
+        allocs, 0,
+        "cached OutputValue reads allocated {allocs} times"
+    );
 }
 
 #[test]
@@ -228,7 +238,9 @@ fn tensor_buffer_prefaulted_and_aligned_are_pointer_identity_zero_copy() {
         return;
     };
 
-    let prefaulted = TensorBuffer::<f32>::zeros_prefaulted(&[1, 1024], &mem).expect("prefaulted");
+    let prefaulted =
+        TensorBuffer::<f32>::zeros_with(&[1, 1024], &mem, BufferSpec::vec().prefault())
+            .expect("prefaulted");
     assert_eq!(
         prefaulted.engine_data_ptr().expect("engine ptr"),
         prefaulted.as_slice().as_ptr(),
@@ -236,7 +248,8 @@ fn tensor_buffer_prefaulted_and_aligned_are_pointer_identity_zero_copy() {
     );
 
     let aligned =
-        TensorBuffer::<f32>::zeros_aligned_prefaulted(&[1, 1024], 64, &mem).expect("aligned");
+        TensorBuffer::<f32>::zeros_with(&[1, 1024], &mem, BufferSpec::aligned(64).prefault())
+            .expect("aligned");
     assert_eq!(
         aligned.engine_data_ptr().expect("engine ptr"),
         aligned.as_slice().as_ptr(),
@@ -248,9 +261,12 @@ fn tensor_buffer_prefaulted_and_aligned_are_pointer_identity_zero_copy() {
         "aligned TensorBuffer pointer is not 64-byte aligned"
     );
 
-    let hugepage =
-        TensorBuffer::<f32>::zeros_aligned_hugepage_prefaulted(&[1, 1 << 19], 2 << 20, &mem)
-            .expect("hugepage");
+    let hugepage = TensorBuffer::<f32>::zeros_with(
+        &[1, 1 << 19],
+        &mem,
+        BufferSpec::aligned(2 << 20).hugepage().prefault(),
+    )
+    .expect("hugepage");
     assert_eq!(
         hugepage.engine_data_ptr().expect("engine ptr"),
         hugepage.as_slice().as_ptr(),
@@ -262,8 +278,12 @@ fn tensor_buffer_prefaulted_and_aligned_are_pointer_identity_zero_copy() {
         "hugepage TensorBuffer pointer is not 2 MiB aligned"
     );
 
-    let locked = TensorBuffer::<f32>::zeros_aligned_mlocked_prefaulted(&[1, 1024], 4096, &mem)
-        .expect("mlocked");
+    let locked = TensorBuffer::<f32>::zeros_with(
+        &[1, 1024],
+        &mem,
+        BufferSpec::aligned(4096).prefault().mlock(),
+    )
+    .expect("mlocked");
     assert_eq!(
         locked.engine_data_ptr().expect("engine ptr"),
         locked.as_slice().as_ptr(),
@@ -324,9 +344,8 @@ fn runtime_runs_are_rust_zero_alloc() {
         return;
     };
 
-    let mut lanes =
-        Runtime::<f32>::shared_session(Arc::new(sess), &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
-            .expect("lane set");
+    let mut lanes = Runtime::<f32>::shared_session(sess, &mem, &[&[1, 1, 28, 28]], &[&[1, 10]], 2)
+        .expect("lane set");
     for lane in lanes.lanes_mut() {
         lane.run().expect("warmup");
     }
@@ -349,7 +368,7 @@ fn static_io_runtime_runs_are_rust_zero_alloc() {
     };
 
     let mut lanes = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&[1, 1, 28, 28]],
         [&[1, 10]],
@@ -378,7 +397,7 @@ fn static_io_runtime_rebind_runs_are_rust_zero_alloc() {
     };
 
     let mut lanes = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&[1, 1, 28, 28]],
         [&[1, 10]],
@@ -415,7 +434,7 @@ fn dynamic_io_runtime_cached_runs_are_rust_zero_alloc() {
         return;
     };
 
-    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(Arc::new(sess), mem, 2)
+    let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 2)
         .expect("dynamic I/O runtime");
     runtime
         .run_on([&[1, 1, 28, 28]], [&[1, 10]], 0, |lane| {
@@ -456,7 +475,7 @@ fn dynamic_io_runtime_cached_rebind_runs_are_rust_zero_alloc() {
 
     let output_mem = mem.try_clone_descriptor().expect("output memory");
     let mut runtime = DynamicIoRuntime::<f32, f32, 1, 1>::shared_session_with_options(
-        Arc::new(sess),
+        sess,
         mem,
         output_mem,
         1,
@@ -482,6 +501,72 @@ fn dynamic_io_runtime_cached_rebind_runs_are_rust_zero_alloc() {
         allocs, 0,
         "DynamicIoRuntime cached rebind run allocated {allocs} times"
     );
+}
+
+#[test]
+fn dynamic_io_prepared_owned_enqueue_is_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+    let mut runtime =
+        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1).expect("runtime");
+    runtime
+        .prime_bucket_enqueued([&[1, 1, 28, 28]], [&[1, 10]], 2)
+        .expect("prepare bucket");
+    let bucket = runtime
+        .prepared_bucket_id([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("prepared id");
+
+    let allocs = measured_allocs(|| {
+        let run = runtime
+            .enqueue_prepared(bucket, |lane| {
+                lane.input_mut_at::<0>()?.fill(0.0);
+                Ok(())
+            })
+            .expect("enqueue prepared");
+        runtime
+            .complete_owned(run, |lane| {
+                assert_eq!(lane.output_at::<0>()?.len(), 10);
+                Ok(())
+            })
+            .expect("complete prepared");
+    });
+    assert_eq!(allocs, 0, "prepared owned enqueue allocated {allocs} times");
+}
+
+#[test]
+fn dynamic_io_dropped_run_recovery_is_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        eprintln!("skipping — mnist.onnx absent");
+        return;
+    };
+    let mut runtime =
+        DynamicIoRuntime::<f32, f32, 1, 1>::shared_session(sess, mem, 1).expect("runtime");
+    runtime
+        .prime_bucket_enqueued([&[1, 1, 28, 28]], [&[1, 10]], 2)
+        .expect("prepare bucket");
+    let bucket = runtime
+        .prepared_bucket_id([&[1, 1, 28, 28]], [&[1, 10]])
+        .expect("prepared id");
+
+    // Warm the cancellation fence and fixed recovery slot before measuring.
+    let warm = runtime
+        .enqueue_prepared(bucket, |_| Ok(()))
+        .expect("warm enqueue");
+    drop(warm);
+    assert_eq!(runtime.reclaim_dropped_runs(), 1);
+
+    let allocs = measured_allocs(|| {
+        let run = runtime
+            .enqueue_prepared(bucket, |_| Ok(()))
+            .expect("enqueue prepared");
+        drop(run);
+        assert_eq!(runtime.reclaim_dropped_runs(), 1);
+    });
+    assert_eq!(allocs, 0, "dropped-run recovery allocated {allocs} times");
 }
 
 #[test]
@@ -518,5 +603,27 @@ fn tensor_io_lane_output_is_pointer_identity_zero_copy() {
             .expect("engine ptr"),
         output_ptr,
         "ORT output pointer changed after run"
+    );
+}
+
+#[test]
+fn serving_lane_direct_input_fill_is_rust_zero_alloc() {
+    let _guard = test_guard();
+    let Some((_env, mem, sess)) = mnist_session() else {
+        return;
+    };
+    let mut lane =
+        st_zrt::ServingLane::<f32, f32, 1, 1>::new(sess, &mem, [&[1, 1, 28, 28]], [&[1, 10]])
+            .expect("lane");
+    let allocs = measured_allocs(|| {
+        lane.fill_inputs(|inputs| {
+            inputs[0].fill(1.0);
+            Ok(())
+        })
+        .expect("direct fill");
+    });
+    assert_eq!(
+        allocs, 0,
+        "ServingLane::fill_inputs allocated {allocs} times"
     );
 }

@@ -7,8 +7,8 @@
 //! Unlike `ep_config`, this requires the CUDA ONNX Runtime build and a working CUDA host.
 
 use st_zrt::{
-    CudaArenaExtendStrategy, CudaCudnnConvAlgoSearch, CudaProviderOptions, Environment,
-    GraphOptimizationLevel, MemoryInfo, OwnedValue, Session, SessionOptions, Tensor,
+    CudaConfig, Environment, GraphOptimizationLevel, MemoryInfo, OwnedValue, Session,
+    SessionOptions, Tensor,
 };
 
 fn main() -> st_zrt::Result<()> {
@@ -20,14 +20,7 @@ fn main() -> st_zrt::Result<()> {
     let env = Environment::new()?;
     let opts = SessionOptions::new()
         .with_opt_level(GraphOptimizationLevel::All)
-        .with_cuda_options(
-            CudaProviderOptions::new()
-                .device_id(0)
-                .arena_extend_strategy(CudaArenaExtendStrategy::NextPowerOfTwo)
-                .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Exhaustive)
-                .do_copy_in_default_stream(true)
-                .use_tf32(true),
-        )?;
+        .with_cuda(CudaConfig::performance(0))?;
     let sess = Session::new(&env, &model, opts)?;
 
     let mem = MemoryInfo::cpu()?;

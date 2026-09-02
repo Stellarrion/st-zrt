@@ -3,7 +3,8 @@
 use crate::allocator::Allocator;
 use crate::element::TensorElement;
 use crate::error::Error;
-use crate::memory::MemoryInfo;
+use crate::memory::{MemoryClass, MemoryInfo};
+use crate::session::SessionInner;
 use crate::type_info::{TensorTypeAndShapeInfo, checked_element_count, tensor_type_and_shape};
 use crate::{Result, api, check, packed_element_bits, sys, tensor_byte_len};
 use std::alloc::{Layout, alloc_zeroed, dealloc, handle_alloc_error};
@@ -15,6 +16,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::ptr;
 use std::ptr::NonNull;
+use std::sync::{Arc, OnceLock};
 
 // ─── inputs: anything passable to Session::run ──────────────────────────────
 
@@ -47,10 +49,47 @@ pub trait RunInput: input_sealed::Sealed {
 /// from `KernelContext::input` and must not release it.
 pub struct TensorView<'a> {
     pub(crate) value: *mut sys::ValueHandle,
+    pub(crate) cache: Option<TensorViewCache>,
+    shape_cache: OnceLock<Vec<i64>>,
     pub(crate) _life: PhantomData<&'a [u8]>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct TensorViewCache {
+    elem_type: sys::ElementType,
+    count: usize,
+    byte_len: usize,
+    memory_class: MemoryClass,
+}
+
 impl<'a> TensorView<'a> {
+    #[cfg(feature = "custom-ops")]
+    pub(crate) fn uncached(value: *mut sys::ValueHandle) -> Self {
+        Self {
+            value,
+            cache: None,
+            shape_cache: OnceLock::new(),
+            _life: PhantomData,
+        }
+    }
+
+    fn cached(
+        value: *mut sys::ValueHandle, elem_type: sys::ElementType, count: usize, byte_len: usize,
+        memory_class: MemoryClass,
+    ) -> Self {
+        Self {
+            value,
+            cache: Some(TensorViewCache {
+                elem_type,
+                count,
+                byte_len,
+                memory_class,
+            }),
+            shape_cache: OnceLock::new(),
+            _life: PhantomData,
+        }
+    }
+
     /// Full type+shape introspection (engine-owned handle; released when dropped).
     pub fn tensor_type_and_shape(&self) -> Result<TensorTypeAndShapeInfo> {
         tensor_type_and_shape(self.value as *const sys::ValueHandle)
@@ -58,12 +97,18 @@ impl<'a> TensorView<'a> {
 
     /// Element type of the tensor.
     pub fn element_type(&self) -> Result<sys::ElementType> {
-        self.tensor_type_and_shape()?.element_type()
+        match self.cache {
+            Some(cache) => Ok(cache.elem_type),
+            None => self.tensor_type_and_shape()?.element_type(),
+        }
     }
 
     /// Element count (product of the dimensions).
     pub fn element_count(&self) -> Result<usize> {
-        self.tensor_type_and_shape()?.element_count()
+        match self.cache {
+            Some(cache) => Ok(cache.count),
+            None => self.tensor_type_and_shape()?.element_count(),
+        }
     }
 
     /// Total numeric tensor backing-buffer size in bytes.
@@ -71,12 +116,32 @@ impl<'a> TensorView<'a> {
     /// Uses ORT's `GetTensorSizeInBytes`, so packed sub-byte tensor storage is measured by the
     /// engine. ORT returns an error for string tensors and non-tensor values.
     pub fn byte_len(&self) -> Result<usize> {
-        tensor_value_byte_len(self.value as *const sys::ValueHandle)
+        match self.cache {
+            Some(cache) => Ok(cache.byte_len),
+            None => tensor_value_byte_len(self.value as *const sys::ValueHandle),
+        }
     }
 
     /// Dimensions of the tensor.
     pub fn dims(&self) -> Result<Vec<i64>> {
-        self.tensor_type_and_shape()?.dims()
+        Ok(self.shape()?.to_vec())
+    }
+
+    /// Dimensions of the tensor as a borrowed slice.
+    ///
+    /// The first call may introspect ORT and allocate to cache the shape; repeated calls reuse the
+    /// cached dimensions without another engine call.
+    pub fn shape(&self) -> Result<&[i64]> {
+        if let Some(shape) = self.shape_cache.get() {
+            return Ok(shape.as_slice());
+        }
+        let dims = self.tensor_type_and_shape()?.dims()?;
+        let _ = self.shape_cache.set(dims);
+        Ok(self
+            .shape_cache
+            .get()
+            .expect("TensorView shape cache was just initialized")
+            .as_slice())
     }
 
     /// Zero-copy typed read of the backing buffer via `GetTensorMutableData`. Returns `Err`
@@ -84,9 +149,23 @@ impl<'a> TensorView<'a> {
     /// device-only memory. Works for any
     /// host-accessible `ValueHandle` the view wraps — a kernel input, an engine-owned CPU tensor
     /// (`copy_from_slice`), or ORT's zero-copy wrapper of a `from_buffer` buffer.
+    ///
+    /// **Read-only / no-alias:** ORT hands out the backing pointer via `GetTensorMutableData` (a
+    /// mutable-data accessor) even on this read path, so the returned `&[T]` must be treated as
+    /// read-only and must not overlap a concurrent mutable access to the same tensor (e.g. a write
+    /// through [`OwnedValue::tensor_mut_at`]). This is why `TensorView` is `Send` but not `Sync`.
     pub fn as_slice<T: TensorElement>(&self) -> Result<&[T]> {
-        let tsi = self.tensor_type_and_shape()?;
-        let elem = tsi.element_type()?;
+        let (elem, count, memory_class) = match self.cache {
+            Some(cache) => (cache.elem_type, cache.count, cache.memory_class),
+            None => {
+                let tsi = self.tensor_type_and_shape()?;
+                (
+                    tsi.element_type()?,
+                    tsi.element_count()?,
+                    tensor_value_memory_class(self.value as *const sys::ValueHandle)?,
+                )
+            },
+        };
         if elem as i32 != T::ELEM as i32 {
             return Err(Error::new(
                 -1,
@@ -97,8 +176,7 @@ impl<'a> TensorView<'a> {
                 ),
             ));
         }
-        let count = tsi.element_count()?;
-        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        ensure_cached_host_accessible(memory_class)?;
         let mut data: *mut c_void = ptr::null_mut();
         check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
         let data = crate::slice_data_ptr(data as *mut T, count, "tensor data")?;
@@ -110,8 +188,14 @@ impl<'a> TensorView<'a> {
     /// Zero-copy read as raw bytes. For packed 2-bit/4-bit tensors this returns the packed
     /// backing storage; use [`Self::element_type`] to interpret the bit layout.
     pub fn as_bytes(&self) -> Result<&[u8]> {
-        let n = self.byte_len()?;
-        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        let (n, memory_class) = match self.cache {
+            Some(cache) => (cache.byte_len, cache.memory_class),
+            None => (
+                tensor_value_byte_len(self.value as *const sys::ValueHandle)?,
+                tensor_value_memory_class(self.value as *const sys::ValueHandle)?,
+            ),
+        };
+        ensure_cached_host_accessible(memory_class)?;
         let mut data: *mut c_void = ptr::null_mut();
         check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
         let data = crate::slice_data_ptr(data as *mut u8, n, "tensor data")?;
@@ -119,8 +203,25 @@ impl<'a> TensorView<'a> {
     }
 }
 
+// SAFETY: `TensorView` exposes the backing buffer via `GetTensorMutableData` (`as_slice`), so a
+// shared `&TensorView` across threads could race on that mutable-data accessor or alias a concurrent
+// write. It is `Send` (move between threads; one owner at a time) but intentionally NOT `Sync` — do
+// not share a `&TensorView` (or `&Tensor`, which derefs to it) across threads.
 unsafe impl Send for TensorView<'_> {}
-unsafe impl Sync for TensorView<'_> {}
+
+impl std::fmt::Debug for TensorView<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ds = f.debug_struct("TensorView");
+        ds.field("value", &self.value);
+        if let Some(cache) = self.cache {
+            ds.field("elem_type", &cache.elem_type)
+                .field("count", &cache.count)
+                .field("byte_len", &cache.byte_len)
+                .field("memory_class", &cache.memory_class);
+        }
+        ds.finish()
+    }
+}
 
 // ─── owning tensor: a session input (releases its handle on drop) ────────────
 
@@ -157,10 +258,7 @@ impl<'a> Tensor<'a> {
         })?;
         let value = crate::ensure_non_null(value, "tensor value")?;
         Ok(Self {
-            view: TensorView {
-                value,
-                _life: PhantomData,
-            },
+            view: TensorView::cached(value, T::ELEM, buf.len(), bytes, mem.class()),
         })
     }
 
@@ -189,11 +287,9 @@ impl<'a> Tensor<'a> {
             )
         })?;
         let value = crate::ensure_non_null(value, "packed tensor value")?;
+        let count = shape_element_count(shape)?;
         Ok(Self {
-            view: TensorView {
-                value,
-                _life: PhantomData,
-            },
+            view: TensorView::cached(value, elem_type, count, buf.len(), mem.class()),
         })
     }
 
@@ -220,11 +316,9 @@ impl<'a> Tensor<'a> {
         let data = crate::slice_data_ptr(data as *mut T, buf.len(), "tensor data")?;
         // The fresh tensor's buffer is uninitialized; copy buf in (engine-aligned).
         unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), data, buf.len()) };
+        let bytes = std::mem::size_of_val(buf);
         Ok(Self {
-            view: TensorView {
-                value,
-                _life: PhantomData,
-            },
+            view: TensorView::cached(value, T::ELEM, buf.len(), bytes, MemoryClass::Cpu),
         })
     }
 
@@ -259,6 +353,12 @@ impl Drop for Tensor<'_> {
 unsafe impl Send for Tensor<'_> {}
 unsafe impl Sync for Tensor<'_> {}
 
+impl std::fmt::Debug for Tensor<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tensor").field("view", &self.view).finish()
+    }
+}
+
 // ─── allocator-owned tensor: CPU or device memory owned by ORT ──────────────
 
 /// An allocator-owned tensor value.
@@ -267,19 +367,35 @@ unsafe impl Sync for Tensor<'_> {}
 /// memory through an [`Allocator`], so the memory can live on CPU or on an execution-provider
 /// device such as CUDA. Host-accessible tensors can be read through [`Self::as_slice`]; device
 /// tensors expose only raw pointers and metadata.
+///
+/// # Lifecycle
+///
+/// Tensors built from [`Allocator::create`] transfer the allocator's originating-session guard into
+/// this value. The native session therefore remains alive through `ReleaseValue` and
+/// `ReleaseAllocator`, even if every public [`crate::Session`] handle is dropped first. Tensors made
+/// with the process-default or environment-shared allocator need no session guard.
 pub struct AllocatedTensor<T: TensorElement> {
     value: *mut sys::ValueHandle,
     allocator: Allocator,
+    data: *mut c_void,
     shape: Vec<i64>,
     count: usize,
+    byte_len: usize,
     elem_type: sys::ElementType,
+    memory_class: MemoryClass,
     _ty: PhantomData<T>,
+    // Declared last so it drops after both `ReleaseValue` and the allocator field.
+    _session: Option<Arc<SessionInner>>,
 }
 
 impl<T: TensorElement> AllocatedTensor<T> {
     /// Allocate a tensor with `allocator` and `shape` via ORT `CreateTensorAsOrtValue`.
-    pub fn new(allocator: Allocator, shape: &[i64]) -> Result<Self> {
+    pub fn new(mut allocator: Allocator, shape: &[i64]) -> Result<Self> {
         let count = shape_element_count(shape)?;
+        let byte_len = count
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| Error::new(-1, "allocated tensor byte length overflows usize"))?;
+        let memory_class = allocator.memory_info()?.class;
         let mut value: *mut sys::ValueHandle = ptr::null_mut();
         check(unsafe {
             api().create_tensor_as_ort_value()(
@@ -291,22 +407,41 @@ impl<T: TensorElement> AllocatedTensor<T> {
             )
         })?;
         let value = crate::ensure_non_null(value, "allocated tensor value")?;
+        let mut data: *mut c_void = ptr::null_mut();
+        let data = match check(unsafe { api().get_tensor_mutable_data()(value, &mut data) })
+            .and_then(|()| crate::slice_data_ptr(data as *mut u8, byte_len, "tensor data"))
+        {
+            Ok(data) => data as *mut c_void,
+            Err(err) => {
+                unsafe { api().release_value()(value) };
+                return Err(err);
+            },
+        };
+        let session = allocator.take_session_guard();
         Ok(Self {
             value,
             allocator,
+            data,
             shape: shape.to_vec(),
             count,
+            byte_len,
             elem_type: T::ELEM,
+            memory_class,
             _ty: PhantomData,
+            _session: session,
         })
     }
 
     /// Allocate a tensor from a session-scoped allocator for `mem`.
+    ///
+    /// The returned tensor keeps the native session alive through its allocator/value teardown.
     pub fn for_session(session: &crate::Session, mem: &MemoryInfo, shape: &[i64]) -> Result<Self> {
         Self::new(Allocator::create(session, mem)?, shape)
     }
 
     /// Allocate a CUDA device tensor from a session-scoped CUDA allocator.
+    ///
+    /// The returned tensor keeps the native session alive through its allocator/value teardown.
     #[cfg(feature = "cuda")]
     pub fn cuda(session: &crate::Session, device_id: i32, shape: &[i64]) -> Result<Self> {
         let mem = MemoryInfo::cuda(device_id)?;
@@ -346,9 +481,7 @@ impl<T: TensorElement> AllocatedTensor<T> {
     }
 
     pub fn byte_len(&self) -> Result<usize> {
-        self.count
-            .checked_mul(std::mem::size_of::<T>())
-            .ok_or_else(|| Error::new(-1, "allocated tensor byte length overflows usize"))
+        Ok(self.byte_len)
     }
 
     /// Memory descriptor for the tensor backing allocation.
@@ -358,36 +491,41 @@ impl<T: TensorElement> AllocatedTensor<T> {
 
     /// Raw backing pointer returned by ORT. For CUDA tensors this is a device pointer.
     pub fn raw_mut_ptr(&self) -> Result<*mut c_void> {
-        let mut data: *mut c_void = ptr::null_mut();
-        check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
-        Ok(crate::slice_data_ptr(data as *mut u8, self.byte_len()?, "tensor data")? as *mut c_void)
+        Ok(self.data)
     }
 
     /// Raw typed backing pointer. For CUDA tensors this is a device pointer.
+    ///
+    /// Obtaining the pointer does not extend device-use lifetime. When an owned serving run will feed
+    /// downstream CUDA work, use `OwnedDynamicIoRun::chain_on_stream` so lane reuse is gated by the
+    /// consumer's completion event.
     pub fn raw_typed_ptr(&self) -> Result<*mut T> {
         Ok(self.raw_mut_ptr()? as *mut T)
     }
 
     /// Host-accessible read.
     pub fn as_slice(&self) -> Result<&[T]> {
-        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        ensure_cached_host_accessible(self.memory_class)?;
         let data = self.raw_typed_ptr()?;
         Ok(unsafe { std::slice::from_raw_parts(data as *const T, self.count) })
     }
 
     /// Host-accessible mutable read/write.
     pub fn as_mut_slice(&mut self) -> Result<&mut [T]> {
-        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        ensure_cached_host_accessible(self.memory_class)?;
         let data = self.raw_typed_ptr()?;
         Ok(unsafe { std::slice::from_raw_parts_mut(data, self.count) })
     }
 
     /// Borrow this value as a tensor view for type/shape introspection.
     pub fn as_view(&self) -> TensorView<'_> {
-        TensorView {
-            value: self.value,
-            _life: PhantomData,
-        }
+        TensorView::cached(
+            self.value,
+            self.elem_type,
+            self.count,
+            self.byte_len,
+            self.memory_class,
+        )
     }
 
     #[inline]
@@ -417,7 +555,201 @@ impl<T: TensorElement> Drop for AllocatedTensor<T> {
 unsafe impl<T: TensorElement + Send> Send for AllocatedTensor<T> {}
 unsafe impl<T: TensorElement + Sync> Sync for AllocatedTensor<T> {}
 
+impl<T: TensorElement> std::fmt::Debug for AllocatedTensor<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AllocatedTensor")
+            .field("value", &self.value)
+            .field("data", &self.data)
+            .field("shape", &self.shape)
+            .field("count", &self.count)
+            .field("byte_len", &self.byte_len)
+            .field("elem_type", &self.elem_type)
+            .field("memory_class", &self.memory_class)
+            .finish_non_exhaustive()
+    }
+}
+
 // ─── reusable owned zero-copy tensor buffer ─────────────────────────────────
+
+const AUTO_ALIGNED_BUFFER_THRESHOLD_BYTES: usize = 1 << 20;
+const AUTO_ALIGNED_BUFFER_ALIGNMENT: usize = 4096;
+const AUTO_HUGEPAGE_BUFFER_THRESHOLD_BYTES: usize = 2 << 20;
+const HUGEPAGE_BUFFER_ALIGNMENT: usize = 2 << 20;
+
+/// Backing allocation selected by [`BufferSpec`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BufferStorage {
+    /// Plain Rust `Vec<T>` storage.
+    Vec,
+    /// Explicitly aligned Rust-owned storage.
+    Aligned,
+    /// CUDA page-locked host storage allocated by `cudaMallocHost`.
+    CudaPinned,
+}
+
+/// Orthogonal storage and placement policy for a reusable dense tensor buffer.
+///
+/// Unlike the former Cartesian `BufferSpec` enum, modifiers compose without adding a new
+/// public variant for every combination. The value is resolved once during buffer construction;
+/// it has no steady-state run cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BufferSpec {
+    storage: BufferStorage,
+    alignment: usize,
+    prefault: bool,
+    hugepage: bool,
+    mlock: bool,
+    auto: bool,
+}
+
+impl BufferSpec {
+    /// Size-dependent balanced policy.
+    pub const AUTO: Self = Self::auto();
+    /// Plain storage whose pages are touched during construction.
+    pub const LATENCY: Self = Self::vec().prefault();
+    /// 2 MiB-aligned, hugepage-hinted, prefaulted storage.
+    pub const THROUGHPUT_LARGE: Self = Self::aligned(HUGEPAGE_BUFFER_ALIGNMENT)
+        .hugepage()
+        .prefault();
+    /// Hugepage-hinted, prefaulted storage locked in RAM where supported.
+    pub const PINNED_HOST: Self = Self::aligned(HUGEPAGE_BUFFER_ALIGNMENT)
+        .hugepage()
+        .prefault()
+        .mlock();
+    /// CUDA page-locked host storage.
+    pub const CUDA_PINNED: Self = Self::cuda_pinned();
+
+    /// Plain zeroed `Vec<T>` storage.
+    pub const fn vec() -> Self {
+        Self {
+            storage: BufferStorage::Vec,
+            alignment: 0,
+            prefault: false,
+            hugepage: false,
+            mlock: false,
+            auto: false,
+        }
+    }
+
+    /// Explicitly aligned storage. Zero selects `align_of::<T>()` at construction.
+    pub const fn aligned(alignment: usize) -> Self {
+        Self {
+            storage: BufferStorage::Aligned,
+            alignment,
+            prefault: false,
+            hugepage: false,
+            mlock: false,
+            auto: false,
+        }
+    }
+
+    /// CUDA page-locked host storage. Allocation requires the `cuda` feature.
+    pub const fn cuda_pinned() -> Self {
+        Self {
+            storage: BufferStorage::CudaPinned,
+            alignment: 0,
+            prefault: false,
+            hugepage: false,
+            mlock: false,
+            auto: false,
+        }
+    }
+
+    /// Balanced size-dependent storage policy.
+    pub const fn auto() -> Self {
+        Self {
+            auto: true,
+            ..Self::vec()
+        }
+    }
+
+    /// Touch one element per page during construction.
+    pub const fn prefault(mut self) -> Self {
+        self.prefault = true;
+        self.auto = false;
+        self
+    }
+
+    /// Request a best-effort transparent-hugepage hint. This selects aligned storage.
+    pub const fn hugepage(mut self) -> Self {
+        if matches!(self.storage, BufferStorage::Vec) {
+            self.storage = BufferStorage::Aligned;
+        }
+        self.hugepage = true;
+        self.auto = false;
+        self
+    }
+
+    /// Lock pages in RAM where supported. This selects aligned storage.
+    pub const fn mlock(mut self) -> Self {
+        if matches!(self.storage, BufferStorage::Vec) {
+            self.storage = BufferStorage::Aligned;
+        }
+        self.mlock = true;
+        self.auto = false;
+        self
+    }
+
+    /// Override byte alignment and select aligned storage.
+    pub const fn alignment(mut self, alignment: usize) -> Self {
+        self.storage = BufferStorage::Aligned;
+        self.alignment = alignment;
+        self.auto = false;
+        self
+    }
+
+    /// Resolve the balanced policy using the established 1 MiB and 2 MiB thresholds.
+    pub const fn resolve(self, bytes: usize) -> Self {
+        if !self.auto {
+            return self;
+        }
+        if bytes >= AUTO_HUGEPAGE_BUFFER_THRESHOLD_BYTES {
+            Self::THROUGHPUT_LARGE
+        } else if bytes >= AUTO_ALIGNED_BUFFER_THRESHOLD_BYTES {
+            Self::aligned(AUTO_ALIGNED_BUFFER_ALIGNMENT).prefault()
+        } else {
+            Self::vec()
+        }
+    }
+
+    /// Whether this is the unresolved size-dependent policy.
+    pub const fn is_auto(self) -> bool {
+        self.auto
+    }
+
+    /// Substitute `fallback` only for the unresolved automatic policy.
+    pub const fn or_if_auto(self, fallback: Self) -> Self {
+        if self.auto { fallback } else { self }
+    }
+
+    pub const fn storage(self) -> BufferStorage {
+        self.storage
+    }
+
+    pub const fn alignment_bytes(self) -> usize {
+        self.alignment
+    }
+
+    pub const fn is_prefaulted(self) -> bool {
+        self.prefault
+    }
+
+    pub const fn uses_hugepages(self) -> bool {
+        self.hugepage
+    }
+
+    pub const fn is_mlocked(self) -> bool {
+        self.mlock
+    }
+}
+
+impl Default for BufferSpec {
+    fn default() -> Self {
+        Self::AUTO
+    }
+}
 
 /// An owned, reusable tensor buffer backed by caller memory.
 ///
@@ -465,6 +797,8 @@ enum TensorStorage<T: TensorElement> {
     Vec(Vec<T>),
     Aligned(AlignedBuffer<T>),
     Mmap(MmapBuffer<T>),
+    #[cfg(feature = "cuda")]
+    CudaPinned(crate::cuda_rt::PinnedBuffer<T>),
 }
 
 impl<T: TensorElement> TensorStorage<T> {
@@ -474,6 +808,8 @@ impl<T: TensorElement> TensorStorage<T> {
             Self::Vec(v) => v.as_slice(),
             Self::Aligned(v) => v.as_slice(),
             Self::Mmap(v) => v.as_slice(),
+            #[cfg(feature = "cuda")]
+            Self::CudaPinned(v) => v.as_slice(),
         }
     }
 
@@ -483,6 +819,8 @@ impl<T: TensorElement> TensorStorage<T> {
             Self::Vec(v) => v.as_mut_slice(),
             Self::Aligned(v) => v.as_mut_slice(),
             Self::Mmap(v) => v.as_mut_slice(),
+            #[cfg(feature = "cuda")]
+            Self::CudaPinned(v) => v.as_mut_slice(),
         }
     }
 
@@ -737,113 +1075,92 @@ impl<T: TensorElement> TensorBuffer<T> {
         })
     }
 
-    /// Create a zero-initialized reusable tensor buffer.
+    /// Create a zero-initialized reusable tensor buffer using a composable allocation policy.
+    ///
+    /// This replaces the former `zeros_prefaulted`, `zeros_cuda_pinned`, and `zeros_aligned_*`
+    /// constructor wrappers; compose the same behavior through `BufferSpec` (for example
+    /// `BufferSpec::aligned(4096).prefault().mlock()`).
+    pub fn zeros_with(shape: &[i64], mem: &MemoryInfo, spec: BufferSpec) -> Result<Self>
+    where
+        T: Clone + Default,
+    {
+        let len = shape_element_count(shape)?;
+        let bytes = len
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| Error::new(-1, "tensor buffer byte length overflows usize"))?;
+        let spec = spec.resolve(bytes);
+        match spec.storage {
+            BufferStorage::Vec => {
+                if spec.alignment != 0 || spec.hugepage || spec.mlock {
+                    return Err(Error::new(
+                        -1,
+                        "plain Vec BufferSpec has aligned-only modifiers",
+                    ));
+                }
+                let mut data = vec![T::default(); len];
+                if spec.prefault {
+                    prefault_slice(&mut data);
+                }
+                Self::from_vec(data, shape, mem)
+            },
+            BufferStorage::Aligned => Self::zeros_aligned_flags(
+                shape,
+                spec.alignment.max(std::mem::align_of::<T>()),
+                mem,
+                spec.hugepage,
+                spec.prefault,
+                spec.mlock,
+            ),
+            BufferStorage::CudaPinned => {
+                if spec.alignment != 0 || spec.hugepage || spec.mlock {
+                    return Err(Error::new(
+                        -1,
+                        "CUDA-pinned BufferSpec does not accept alignment, hugepage, or mlock modifiers",
+                    ));
+                }
+                #[cfg(feature = "cuda")]
+                {
+                    let mut data = crate::cuda_rt::PinnedBuffer::zeros(len)?;
+                    if spec.prefault {
+                        prefault_slice(data.as_mut_slice());
+                    }
+                    Self::from_storage(TensorStorage::CudaPinned(data), shape, mem)
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    let _ = (shape, mem, len);
+                    Err(Error::new(
+                        -1,
+                        "CUDA-pinned BufferSpec requires the `cuda` feature",
+                    ))
+                }
+            },
+        }
+    }
+
+    /// Create a zero-initialized reusable tensor buffer with plain `Vec<T>` storage.
     pub fn zeros(shape: &[i64], mem: &MemoryInfo) -> Result<Self>
     where
         T: Clone + Default,
     {
-        let len = shape_element_count(shape)?;
-        Self::from_vec(vec![T::default(); len], shape, mem)
+        Self::zeros_with(shape, mem, BufferSpec::vec())
     }
 
-    /// Create a zero-initialized reusable tensor buffer and touch one element per page
-    /// before binding it to ORT. This moves first-touch page faults out of the request path.
-    pub fn zeros_prefaulted(shape: &[i64], mem: &MemoryInfo) -> Result<Self>
-    where
-        T: Clone + Default,
-    {
-        let len = shape_element_count(shape)?;
-        let mut data = vec![T::default(); len];
-        prefault_slice(&mut data);
-        Self::from_vec(data, shape, mem)
-    }
-
-    /// Create a zero-initialized reusable tensor buffer with an explicit byte alignment.
-    /// `alignment` must be a power of two and at least `align_of::<T>()`.
-    pub fn zeros_aligned(shape: &[i64], alignment: usize, mem: &MemoryInfo) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let data = TensorStorage::Aligned(AlignedBuffer::zeroed(len, alignment)?);
-        Self::from_storage(data, shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer and prefault it before binding to ORT.
-    pub fn zeros_aligned_prefaulted(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
-    ) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let mut data = TensorStorage::Aligned(AlignedBuffer::zeroed(len, alignment)?);
-        prefault_slice(data.as_mut_slice());
-        Self::from_storage(data, shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer and lock its pages in RAM where supported.
-    ///
-    /// On Linux this calls `mlock` and returns an error if the kernel rejects the request
-    /// (commonly due to `RLIMIT_MEMLOCK`). On other platforms this is currently a no-op.
-    pub fn zeros_aligned_mlocked(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
+    fn zeros_aligned_flags(
+        shape: &[i64], alignment: usize, mem: &MemoryInfo, hugepage: bool, prefault: bool,
+        mlock: bool,
     ) -> Result<Self> {
         let len = shape_element_count(shape)?;
         let mut data = AlignedBuffer::zeroed(len, alignment)?;
-        data.lock_pages()?;
-        Self::from_storage(TensorStorage::Aligned(data), shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer, prefault it, and lock its pages in RAM.
-    pub fn zeros_aligned_mlocked_prefaulted(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
-    ) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let mut data = AlignedBuffer::zeroed(len, alignment)?;
-        prefault_slice(data.as_mut_slice());
-        data.lock_pages()?;
-        Self::from_storage(TensorStorage::Aligned(data), shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer and apply a best-effort hugepage hint before
-    /// binding it to ORT.
-    pub fn zeros_aligned_hugepage(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
-    ) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let data = TensorStorage::Aligned(AlignedBuffer::zeroed(len, alignment)?);
-        advise_hugepage(data.as_slice());
-        Self::from_storage(data, shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer, apply a best-effort hugepage hint, and prefault
-    /// it before binding to ORT.
-    pub fn zeros_aligned_hugepage_prefaulted(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
-    ) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let mut data = TensorStorage::Aligned(AlignedBuffer::zeroed(len, alignment)?);
-        advise_hugepage(data.as_slice());
-        prefault_slice(data.as_mut_slice());
-        Self::from_storage(data, shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer, apply a hugepage hint, and lock its pages in RAM.
-    pub fn zeros_aligned_hugepage_mlocked(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
-    ) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let mut data = AlignedBuffer::zeroed(len, alignment)?;
-        advise_hugepage(data.as_slice());
-        data.lock_pages()?;
-        Self::from_storage(TensorStorage::Aligned(data), shape, mem)
-    }
-
-    /// Create an aligned reusable tensor buffer, apply a hugepage hint, prefault it, and lock
-    /// its pages in RAM.
-    pub fn zeros_aligned_hugepage_mlocked_prefaulted(
-        shape: &[i64], alignment: usize, mem: &MemoryInfo,
-    ) -> Result<Self> {
-        let len = shape_element_count(shape)?;
-        let mut data = AlignedBuffer::zeroed(len, alignment)?;
-        advise_hugepage(data.as_slice());
-        prefault_slice(data.as_mut_slice());
-        data.lock_pages()?;
+        if hugepage {
+            advise_hugepage(data.as_slice());
+        }
+        if prefault {
+            prefault_slice(data.as_mut_slice());
+        }
+        if mlock {
+            data.lock_pages()?;
+        }
         Self::from_storage(TensorStorage::Aligned(data), shape, mem)
     }
 
@@ -910,7 +1227,15 @@ fn prefault_slice<T: TensorElement>(slice: &mut [T]) {
         return;
     }
     let elem_size = std::mem::size_of::<T>().max(1);
-    let stride = (4096 / elem_size).max(1);
+    // Touch one element per page so the kernel maps every page now, moving first-touch faults out
+    // of the request path. Derive the stride from the real page size — 16K/64K-page ARM/Apple would
+    // be under-prefaulted by a hardcoded 4K. `sysconf` is Linux-only; elsewhere fall back to 4K, and
+    // also on a failed sysconf (prefault is a perf hint, not a correctness requirement).
+    #[cfg(target_os = "linux")]
+    let page = page_size().unwrap_or(4096);
+    #[cfg(not(target_os = "linux"))]
+    let page = 4096usize;
+    let stride = (page / elem_size).max(1);
     let ptr = slice.as_mut_ptr();
     for i in (0..slice.len()).step_by(stride) {
         unsafe {
@@ -1114,6 +1439,17 @@ impl<T: TensorElement> Drop for TensorBuffer<T> {
 unsafe impl<T: TensorElement + Send> Send for TensorBuffer<T> {}
 unsafe impl<T: TensorElement + Sync> Sync for TensorBuffer<T> {}
 
+impl<T: TensorElement> std::fmt::Debug for TensorBuffer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TensorBuffer")
+            .field("value", &self.value)
+            .field("shape", &self.shape)
+            .field("len", &self.data.len())
+            .field("elem_type", &self.elem_type)
+            .finish_non_exhaustive()
+    }
+}
+
 fn shape_element_count(shape: &[i64]) -> Result<usize> {
     checked_element_count(shape)
 }
@@ -1167,32 +1503,35 @@ fn tensor_value_byte_len(value: *const sys::ValueHandle) -> Result<usize> {
     Ok(bytes)
 }
 
-fn ensure_value_host_accessible(value: *const sys::ValueHandle) -> Result<()> {
-    let info = tensor_memory_info(value)?;
-    if !info.is_host_accessible() {
-        return Err(Error::new(
+pub(crate) fn tensor_value_memory_class(value: *const sys::ValueHandle) -> Result<MemoryClass> {
+    let mut info: *const sys::MemoryInfoHandle = ptr::null();
+    check(unsafe { api().get_tensor_memory_info()(value, &mut info) })?;
+    crate::memory::class_from_ptr(info)
+}
+
+fn ensure_cached_host_accessible(memory_class: MemoryClass) -> Result<()> {
+    if memory_class.is_host_accessible() {
+        Ok(())
+    } else {
+        Err(Error::new(
             -1,
-            format!(
-                "tensor memory is not host-accessible: {} device {} ({:?}/{:?})",
-                info.name, info.device_id, info.alloc_type, info.mem_type
-            ),
-        ));
+            format!("tensor memory class is not host-accessible: {memory_class:?}"),
+        ))
     }
-    Ok(())
 }
 
 fn ensure_memory_host_accessible(mem: &MemoryInfo) -> Result<()> {
-    let info = mem.snapshot()?;
-    if !info.is_host_accessible() {
-        return Err(Error::new(
-            -1,
-            format!(
-                "Rust slice-backed tensors require host-accessible memory, got {} device {} ({:?}/{:?})",
-                info.name, info.device_id, info.alloc_type, info.mem_type
-            ),
-        ));
+    if mem.is_host_accessible() {
+        return Ok(());
     }
-    Ok(())
+    let info = mem.snapshot()?;
+    Err(Error::new(
+        -1,
+        format!(
+            "Rust slice-backed tensors require host-accessible memory, got {} device {} ({:?}/{:?})",
+            info.name, info.device_id, info.alloc_type, info.mem_type
+        ),
+    ))
 }
 
 // ─── sparse tensor inputs/readback ──────────────────────────────────────────
@@ -1680,6 +2019,56 @@ impl StringTensor {
         check(unsafe { api().fill_string_tensor()(value, ptrs.as_ptr(), ptrs.len()) })?;
         Ok(Self { value })
     }
+
+    /// Replace the string at flat `index` (`FillStringTensorElement`).
+    pub fn set_element(&mut self, index: usize, s: &str) -> Result<()> {
+        let cs =
+            CString::new(s).map_err(|_| Error::new(-1, "string tensor element contains a NUL"))?;
+        check(unsafe { api().fill_string_tensor_element()(self.value, cs.as_ptr(), index) })
+    }
+
+    /// Replace the string at flat `index` from raw UTF-8 bytes with **no NUL terminator**
+    /// (`GetResizedStringTensorElementBuffer`). The engine resizes the element's storage to
+    /// `bytes.len()` and returns a writable buffer; the bytes are copied in (no NUL added).
+    pub fn set_element_utf8(&mut self, index: usize, bytes: &[u8]) -> Result<()> {
+        let mut buf: *mut c_char = ptr::null_mut();
+        check(unsafe {
+            api().get_resized_string_tensor_element_buffer()(
+                self.value,
+                index,
+                bytes.len(),
+                &mut buf,
+            )
+        })?;
+        if !buf.is_null() {
+            // SAFETY: ORT returned `buf` with room for exactly `bytes.len()` bytes.
+            unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, bytes.len()) };
+        }
+        Ok(())
+    }
+
+    /// Read the string at flat `index` (`GetStringTensorElementLength` + `GetStringTensorElement`).
+    pub fn element(&self, index: usize) -> Result<String> {
+        let mut len: usize = 0;
+        check(unsafe {
+            api().get_string_tensor_element_length()(
+                self.value as *const sys::ValueHandle,
+                index,
+                &mut len,
+            )
+        })?;
+        let mut buf = vec![0u8; len];
+        check(unsafe {
+            api().get_string_tensor_element()(
+                self.value as *const sys::ValueHandle,
+                len,
+                index,
+                buf.as_mut_ptr() as *mut core::ffi::c_void,
+            )
+        })?;
+        String::from_utf8(buf)
+            .map_err(|_| Error::new(-1, "string tensor element is not valid UTF-8"))
+    }
 }
 
 impl RunInput for StringTensor {
@@ -1708,6 +2097,7 @@ pub struct OwnedValue {
     pub(crate) onnx_type: sys::OnnxType,
     pub(crate) elem_type: sys::ElementType,
     pub(crate) count: usize,
+    pub(crate) memory_class: OnceLock<MemoryClass>,
 }
 
 impl OwnedValue {
@@ -1730,6 +2120,7 @@ impl OwnedValue {
                 onnx_type: value_kind,
                 elem_type,
                 count,
+                memory_class: OnceLock::new(),
             })
         })();
         if result.is_err() && !value.is_null() {
@@ -1738,7 +2129,57 @@ impl OwnedValue {
         result
     }
 
-    /// Convert a raw owning output-handle array into owned values. On error, releases the
+    /// Build a tensor value from a buffer that ORT will free via the allocator that produced it
+    /// when this value is released (`CreateTensorWithDataAndDeleterAsOrtValue`, idx 292).
+    ///
+    /// `allocation` is consumed: its backing memory is handed to ORT and freed by it on drop
+    /// (the `Allocation`'s own `Drop` is suppressed). The deleter is exactly `allocation`'s
+    /// allocator, so the free always matches the allocation. **Lifecycle contract:** that
+    /// allocator must outlive this value — ORT stores the deleter pointer and calls it on
+    /// release. With the process-global default allocator ([`Allocator::get_default`]) this is
+    /// automatic; with a session allocator the caller must keep it alive for as long as the value
+    /// may live.
+    ///
+    /// `byte_len` (from the allocation) must hold at least one element of `elem_type`; `shape`
+    /// is the tensor shape (its product is the element count).
+    pub fn from_allocated(
+        allocation: crate::allocator::Allocation<'_>, shape: &[i64], elem_type: sys::ElementType,
+    ) -> Result<Self> {
+        let deleter = allocation.allocator_handle();
+        let (p_data, p_data_len) = allocation.into_raw_parts();
+        // Sanity: the buffer must hold whole elements of the requested type.
+        let elem_bytes = crate::element_size(elem_type);
+        if elem_bytes != 0 && p_data_len % elem_bytes != 0 {
+            // ORT did not take ownership yet — free via the matching allocator to avoid a leak.
+            let _ = unsafe { crate::api().allocator_free()(deleter, p_data) };
+            return Err(Error::new(
+                -1,
+                format!(
+                    "zrt: allocation of {p_data_len} bytes is not a whole multiple of {elem_type:?} ({elem_bytes} bytes)"
+                ),
+            ));
+        }
+        let mut value: *mut sys::ValueHandle = ptr::null_mut();
+        let res = check(unsafe {
+            api().create_tensor_with_data_and_deleter_as_ort_value()(
+                deleter,
+                p_data,
+                p_data_len,
+                shape.as_ptr(),
+                shape.len(),
+                elem_type,
+                &mut value,
+            )
+        });
+        if let Err(e) = res {
+            // Creation failed before ORT took ownership — reclaim the buffer to avoid a leak.
+            let _ = unsafe { crate::api().allocator_free()(deleter, p_data) };
+            return Err(e);
+        }
+        let value = crate::ensure_non_null(value, "deleter-backed tensor")?;
+        // Introspect to populate onnx_type/elem_type/count from the engine's own view of the value.
+        Self::from_introspect(value)
+    }
     /// failed handle (via `from_introspect`) and every unwrapped remaining handle.
     pub(crate) fn collect_from_raw(handles: &[*mut sys::ValueHandle]) -> Result<Vec<OwnedValue>> {
         let mut values = Vec::with_capacity(handles.len());
@@ -1826,6 +2267,138 @@ impl OwnedValue {
         tensor_type_and_shape(self.value as *const sys::ValueHandle)
     }
 
+    /// Whether this value is a tensor (`IsTensor`).
+    pub fn is_tensor(&self) -> Result<bool> {
+        let mut out: c_int = 0;
+        check(unsafe { api().is_tensor()(self.value as *const sys::ValueHandle, &mut out) })?;
+        Ok(out != 0)
+    }
+
+    /// Whether this (optional) value carries a value (`HasValue`).
+    pub fn has_value(&self) -> Result<bool> {
+        let mut out: c_int = 0;
+        check(unsafe { api().has_value()(self.value as *const sys::ValueHandle, &mut out) })?;
+        Ok(out != 0)
+    }
+
+    /// The value's full type info (`GetTypeInfo`). Owns the returned handle.
+    pub fn type_info(&self) -> Result<crate::RuntimeTypeInfo> {
+        let mut ti: *mut sys::TypeInfoHandle = ptr::null_mut();
+        check(unsafe { api().get_type_info()(self.value as *const sys::ValueHandle, &mut ti) })?;
+        let ti = crate::ensure_non_null(ti, "value type info")?;
+        // SAFETY: `ti` is a freshly-allocated owning handle from ORT.
+        Ok(unsafe { crate::RuntimeTypeInfo::from_owning(ti) })
+    }
+
+    /// The element type + shape, fetched in one call (`GetTensorElementTypeAndShapeDataReference`).
+    /// The shape is borrowed from the engine for the call and copied into an owned `Vec<i64>`.
+    /// Tensor values only.
+    pub fn element_type_and_shape(&self) -> Result<(sys::ElementType, Vec<i64>)> {
+        let mut etype = sys::ElementType::Undefined;
+        let mut shape_ptr: *const i64 = ptr::null();
+        let mut count: usize = 0;
+        check(unsafe {
+            api().get_tensor_element_type_and_shape_data_reference()(
+                self.value as *const sys::ValueHandle,
+                &mut etype,
+                &mut shape_ptr as *mut _ as *const *const i64,
+                &mut count,
+            )
+        })?;
+        let dims = if shape_ptr.is_null() || count == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(shape_ptr, count) }.to_vec()
+        };
+        Ok((etype, dims))
+    }
+
+    /// Read-only pointer to the tensor element at the N-dimensional `location` (`TensorAt`). The
+    /// pointer borrows into the value's backing buffer; valid while the value lives. Tensor values
+    /// only.
+    ///
+    /// Returns `*const` because this takes `&self` — use [`Self::tensor_mut_at`] for a writable
+    /// (`*mut`) pointer through `&mut self`.
+    pub fn tensor_at(&self, location: &[i64]) -> Result<*const c_void> {
+        let mut out: *mut c_void = ptr::null_mut();
+        check(unsafe {
+            api().tensor_at()(self.value, location.as_ptr(), location.len(), &mut out)
+        })?;
+        Ok(out as *const c_void)
+    }
+
+    /// Writable pointer to the tensor element at the N-dimensional `location` (`TensorAt`), through
+    /// `&mut self`. The pointer borrows into the value's backing buffer; valid while the value
+    /// lives. Tensor values only.
+    pub fn tensor_mut_at(&mut self, location: &[i64]) -> Result<*mut c_void> {
+        let mut out: *mut c_void = ptr::null_mut();
+        check(unsafe {
+            api().tensor_at()(self.value, location.as_ptr(), location.len(), &mut out)
+        })?;
+        Ok(out)
+    }
+
+    /// Build a composite value (Sequence or Map) from `parts` (`CreateValue`). A Sequence takes N
+    /// elements; a Map takes exactly 2 (keys tensor, values tensor).
+    pub fn new_composite(parts: &[&OwnedValue], kind: sys::OnnxType) -> Result<Self> {
+        let handles: Vec<*const sys::ValueHandle> = parts
+            .iter()
+            .map(|v| v.value as *const sys::ValueHandle)
+            .collect();
+        let mut out: *mut sys::ValueHandle = ptr::null_mut();
+        check(unsafe { api().create_value()(handles.as_ptr(), handles.len(), kind, &mut out) })?;
+        Self::from_introspect(out)
+    }
+
+    /// Build a Sequence value from `elements` (`CreateValue` with `ONNX_TYPE_SEQUENCE`).
+    pub fn new_sequence(elements: &[&OwnedValue]) -> Result<Self> {
+        Self::new_composite(elements, sys::OnnxType::Sequence)
+    }
+
+    /// Build a Map value from a keys tensor and a values tensor (`CreateValue` with
+    /// `ONNX_TYPE_MAP`).
+    pub fn new_map(keys: &OwnedValue, values: &OwnedValue) -> Result<Self> {
+        Self::new_composite(&[keys, values], sys::OnnxType::Map)
+    }
+
+    /// Wrap `data` as an opaque value under `(domain, type_name)` (`CreateOpaqueValue`). Expert/raw
+    /// — the container format is ORT/EP-specific; round-trip it with [`Self::get_opaque`].
+    pub fn opaque(domain: &str, type_name: &str, data: &[u8]) -> Result<Self> {
+        let cd =
+            CString::new(domain).map_err(|_| Error::new(-1, "opaque domain contains a NUL"))?;
+        let ct = CString::new(type_name)
+            .map_err(|_| Error::new(-1, "opaque type name contains a NUL"))?;
+        let mut out: *mut sys::ValueHandle = ptr::null_mut();
+        check(unsafe {
+            api().create_opaque_value()(
+                cd.as_ptr(),
+                ct.as_ptr(),
+                data.as_ptr() as *const c_void,
+                data.len(),
+                &mut out,
+            )
+        })?;
+        Self::from_introspect(out)
+    }
+
+    /// Read an opaque value's container into `out` (`GetOpaqueValue`). `(domain, type_name)` must
+    /// match the creation pair; `out` must be sized to hold the container.
+    pub fn get_opaque(&self, domain: &str, type_name: &str, out: &mut [u8]) -> Result<()> {
+        let cd =
+            CString::new(domain).map_err(|_| Error::new(-1, "opaque domain contains a NUL"))?;
+        let ct = CString::new(type_name)
+            .map_err(|_| Error::new(-1, "opaque type name contains a NUL"))?;
+        check(unsafe {
+            api().get_opaque_value()(
+                cd.as_ptr(),
+                ct.as_ptr(),
+                self.value as *const sys::ValueHandle,
+                out.as_mut_ptr() as *mut c_void,
+                out.len(),
+            )
+        })
+    }
+
     /// Memory descriptor for this tensor's backing allocation.
     pub fn memory_info(&self) -> Result<crate::memory::MemoryInfoSnapshot> {
         tensor_memory_info(self.value as *const sys::ValueHandle)
@@ -1865,6 +2438,19 @@ impl OwnedValue {
         crate::memory::memory_device_snapshot_from_ptr(device)
     }
 
+    fn ensure_host_accessible(&self) -> Result<()> {
+        let memory_class = match self.memory_class.get() {
+            Some(memory_class) => *memory_class,
+            None => {
+                let memory_class =
+                    tensor_value_memory_class(self.value as *const sys::ValueHandle)?;
+                let _ = self.memory_class.set(memory_class);
+                memory_class
+            },
+        };
+        ensure_cached_host_accessible(memory_class)
+    }
+
     /// Zero-copy read of the engine-owned backing buffer as a typed slice
     /// (`GetTensorMutableData`). One FFI call, no allocation, no introspection.
     pub fn as_slice<T: TensorElement>(&self) -> Result<&[T]> {
@@ -1884,7 +2470,7 @@ impl OwnedValue {
                 ),
             ));
         }
-        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        self.ensure_host_accessible()?;
         let mut data: *mut c_void = ptr::null_mut();
         check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
         let data = crate::slice_data_ptr(data as *mut T, self.count, "tensor data")?;
@@ -1897,7 +2483,7 @@ impl OwnedValue {
     /// this returns the packed backing storage.
     pub fn as_bytes(&self) -> Result<&[u8]> {
         let n = self.byte_len()?;
-        ensure_value_host_accessible(self.value as *const sys::ValueHandle)?;
+        self.ensure_host_accessible()?;
         let mut data: *mut c_void = ptr::null_mut();
         check(unsafe { api().get_tensor_mutable_data()(self.value, &mut data) })?;
         let data = crate::slice_data_ptr(data as *mut u8, n, "tensor data")?;
@@ -1967,6 +2553,18 @@ pub(crate) fn read_string_tensor(
 
 unsafe impl Send for OwnedValue {}
 unsafe impl Sync for OwnedValue {}
+
+impl std::fmt::Debug for OwnedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedValue")
+            .field("value", &self.value)
+            .field("onnx_type", &self.onnx_type)
+            .field("elem_type", &self.elem_type)
+            .field("count", &self.count)
+            .field("memory_class", &self.memory_class.get())
+            .finish()
+    }
+}
 
 /// An owned ORT value intended for explicit device/placement-aware handling.
 ///
@@ -2044,6 +2642,12 @@ impl DeviceValue {
     }
 }
 
+impl std::fmt::Debug for DeviceValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("DeviceValue").field(&self.value).finish()
+    }
+}
+
 impl Drop for OwnedValue {
     fn drop(&mut self) {
         unsafe { api().release_value()(self.value) }
@@ -2078,6 +2682,10 @@ mod tests {
         assert_eq!(v.element_type().unwrap(), sys::ElementType::Float);
         assert_eq!(v.element_count().unwrap(), 4);
         assert_eq!(v.dims().unwrap(), vec![2, 2]);
+        let shape = v.shape().unwrap();
+        assert_eq!(shape, &[2, 2]);
+        let shape_ptr = shape.as_ptr();
+        assert_eq!(v.shape().unwrap().as_ptr(), shape_ptr);
         assert_eq!(v.byte_len().unwrap(), std::mem::size_of_val(&buf));
         assert_eq!(v.as_bytes().unwrap().len(), std::mem::size_of_val(&buf));
         assert_eq!(v.as_slice::<f32>().unwrap(), &buf[..]);
@@ -2143,7 +2751,13 @@ mod tests {
             return;
         }
 
-        let env = crate::Environment::new().unwrap();
+        let _envs = crate::lock_default_env_creation();
+        let env = crate::Environment::new_with_logger(
+            crate::sys::LoggingLevel::Warning,
+            "allocated-tensor-test",
+            |_| {},
+        )
+        .unwrap();
         let mem = MemoryInfo::cpu().unwrap();
         let sess = crate::Session::new(
             &env,
@@ -2154,6 +2768,8 @@ mod tests {
         let alloc = Allocator::create(&sess, &mem).unwrap();
         let mut tensor =
             AllocatedTensor::<f32>::copy_from_slice(alloc, &[2, 2], &[1.0, 2.0, 3.0, 4.0]).unwrap();
+        let data = tensor.raw_mut_ptr().unwrap();
+        assert_eq!(tensor.raw_mut_ptr().unwrap(), data);
         assert_eq!(tensor.as_slice().unwrap(), &[1.0, 2.0, 3.0, 4.0]);
         tensor.as_mut_slice().unwrap()[0] = 9.0;
         assert_eq!(tensor.as_slice().unwrap()[0], 9.0);
@@ -2313,5 +2929,120 @@ mod tests {
         let got = read_string_tensor(st.value as *const sys::ValueHandle, words.len()).unwrap();
         assert_eq!(got, words);
         assert!(tensor_value_byte_len(st.value as *const sys::ValueHandle).is_err());
+    }
+
+    #[test]
+    fn owned_value_from_allocated_buffer_is_sound() {
+        // `CreateTensorWithDataAndDeleterAsOrtValue` (idx 292): a buffer ORT will free via the
+        // allocator that produced it when the value is released. We allocate via the process-global
+        // default allocator, hand the allocation to ORT, and let drop free it through that same
+        // allocator — proving the deleter path round-trips without a double free or crash.
+        let alloc = Allocator::get_default().expect("default alloc");
+        let n: usize = 4;
+        let byte_len = n * std::mem::size_of::<f32>();
+        let allocation = alloc.allocate(byte_len).expect("allocate");
+        assert_eq!(
+            allocation.len(),
+            byte_len,
+            "Allocation tracks its byte length"
+        );
+        unsafe {
+            std::ptr::write_bytes(allocation.as_mut_ptr() as *mut u8, 0, byte_len);
+        }
+        let v = OwnedValue::from_allocated(allocation, &[2, 2], sys::ElementType::Float)
+            .expect("from_allocated");
+        assert_eq!(v.onnx_type(), sys::OnnxType::Tensor);
+        assert_eq!(v.element_type(), sys::ElementType::Float);
+        assert_eq!(v.element_count(), n);
+        // Drop here: ORT frees the buffer through the default allocator (no Rust free, no leak).
+    }
+
+    #[test]
+    fn owned_value_t2_9_introspection_round_trip() {
+        // Value/type introspection: is_tensor, has_value, type_info, element_type_and_shape,
+        // tensor_at, denotation, cast_to_tensor (+ the None cast_to_map/sequence/optional paths),
+        // new_sequence, and the TSI has_shape/shape_element_count accessors.
+        let alloc = Allocator::get_default().expect("default alloc");
+        let n: usize = 4;
+        let byte_len = n * std::mem::size_of::<f32>();
+        let allocation = alloc.allocate(byte_len).expect("allocate");
+        unsafe {
+            let p = allocation.as_mut_ptr() as *mut f32;
+            *p = 1.0;
+            *p.add(1) = 2.0;
+            *p.add(2) = 3.0;
+            *p.add(3) = 4.0;
+        }
+        let v = OwnedValue::from_allocated(allocation, &[2, 2], sys::ElementType::Float)
+            .expect("tensor");
+        assert!(v.is_tensor().expect("is_tensor"));
+        assert!(v.has_value().expect("has_value"));
+        let (et, dims) = v.element_type_and_shape().expect("et+shape");
+        assert_eq!(et, sys::ElementType::Float);
+        assert_eq!(dims, vec![2, 2]);
+        let ti = v.type_info().expect("type_info");
+        assert_eq!(ti.onnx_type().expect("onnx"), sys::OnnxType::Tensor);
+        assert_eq!(ti.denotation().expect("denotation"), "");
+        let tv = ti.cast_to_tensor().expect("cast").expect("tensor view");
+        assert!(tv.has_shape());
+        assert_eq!(tv.shape_element_count().expect("count"), 4);
+        assert_eq!(tv.element_type().expect("et"), sys::ElementType::Float);
+        // tensor_at([0,1]) → element index 1 → 2.0.
+        let p = v.tensor_at(&[0, 1]).expect("tensor_at");
+        assert!(!p.is_null());
+        assert_eq!(unsafe { *(p as *const f32) }, 2.0);
+        // TSI direct accessors.
+        let tsi = v.tensor_type_and_shape().expect("tsi");
+        assert!(tsi.has_shape());
+        assert_eq!(tsi.shape_element_count().expect("count"), 4);
+        // A tensor is not a map/sequence/optional → casts return None (clean paths).
+        assert!(ti.cast_to_map().expect("map cast").is_none());
+        assert!(ti.cast_to_sequence().expect("seq cast").is_none());
+        assert!(ti.cast_to_optional().expect("opt cast").is_none());
+        // create_value: a Sequence of two tensors.
+        let alloc2 = Allocator::get_default().expect("alloc2");
+        let a2 = alloc2
+            .allocate(2 * std::mem::size_of::<f32>())
+            .expect("alloc2 buf");
+        let v2 = OwnedValue::from_allocated(a2, &[2], sys::ElementType::Float).expect("v2");
+        let seq = OwnedValue::new_sequence(&[&v, &v2]).expect("sequence");
+        assert_eq!(seq.onnx_type(), sys::OnnxType::Sequence);
+        assert_eq!(seq.value_count().expect("count"), 2);
+        // opaque create/get (tolerant — ORT's opaque container format is EP-specific).
+        if let Ok(o) = OwnedValue::opaque("zrt", "blob", &[0u8; 8]) {
+            let mut buf = [0u8; 8];
+            let _ = o.get_opaque("zrt", "blob", &mut buf);
+        }
+    }
+
+    #[test]
+    fn owned_value_tensor_mut_at_writes_element() {
+        // tensor_mut_at hands out a *mut through &mut self (write path). Write through it, then read
+        // back via tensor_at (*const, read path) to confirm both resolve to the same element.
+        let alloc = Allocator::get_default().expect("default alloc");
+        let n: usize = 4;
+        let allocation = alloc
+            .allocate(n * std::mem::size_of::<f32>())
+            .expect("allocate");
+        unsafe {
+            let p = allocation.as_mut_ptr() as *mut f32;
+            *p = 1.0;
+            *p.add(1) = 2.0;
+            *p.add(2) = 3.0;
+            *p.add(3) = 4.0;
+        }
+        let mut v = OwnedValue::from_allocated(allocation, &[2, 2], sys::ElementType::Float)
+            .expect("tensor");
+        // tensor_mut_at([1, 0]) → element index 2 → overwrite 3.0 with 30.0.
+        {
+            let p = v.tensor_mut_at(&[1, 0]).expect("tensor_mut_at");
+            assert!(!p.is_null());
+            unsafe { *(p as *mut f32) = 30.0 };
+        }
+        // Read back through the *const accessor; an unrelated element is untouched.
+        let r = v.tensor_at(&[1, 0]).expect("tensor_at");
+        assert_eq!(unsafe { *(r as *const f32) }, 30.0);
+        let r0 = v.tensor_at(&[0, 0]).expect("tensor_at");
+        assert_eq!(unsafe { *(r0 as *const f32) }, 1.0);
     }
 }

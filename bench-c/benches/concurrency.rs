@@ -3,7 +3,7 @@
 //! One shared session, N independent `TensorIoLane` lanes, N scoped threads. Each thread
 //! runs its lane repeatedly. This measures the serving architecture we care about: no
 //! per-request allocation/copy/rebind in ZRT, and no shared mutable tensor buffers.
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use st_zrt::{Environment, GraphOptimizationLevel, MemoryInfo, SessionOptions};
 use st_zrt_bench_c::models;
 

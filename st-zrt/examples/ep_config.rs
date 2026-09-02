@@ -8,21 +8,14 @@
 //! the crate to a GPU ONNX Runtime binary. Use `cuda` when the program must actually run CUDA
 //! inference.
 
-use st_zrt::{
-    CudaArenaExtendStrategy, CudaCudnnConvAlgoSearch, CudaProviderOptions, EpProvider,
-    SessionOptions,
-};
+use st_zrt::{CudaConfig, DeviceInputPolicy, EpProvider, SessionOptions};
 
 fn main() -> st_zrt::Result<()> {
-    let cuda = CudaProviderOptions::new()
-        .device_id(0)
-        .arena_extend_strategy(CudaArenaExtendStrategy::NextPowerOfTwo)
-        .cudnn_conv_algo_search(CudaCudnnConvAlgoSearch::Heuristic)
-        .do_copy_in_default_stream(true)
-        .use_tf32(true);
+    let cuda =
+        CudaConfig::performance(0).with_device_input_policy(DeviceInputPolicy::UnifiedStream)?;
 
     let _opts = SessionOptions::new()
-        .with_cuda_options(cuda)?
+        .with_cuda(cuda)?
         .with_execution_provider(EpProvider::OpenVinoV2, &[("device_type", "CPU")])?;
 
     println!("queued CUDA and OpenVINO provider configuration");

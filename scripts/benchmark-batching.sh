@@ -36,7 +36,7 @@ for model in $models; do
           else
             export ZRT_INTER_THREADS="$inter"
           fi
-          cargo run --quiet --release --manifest-path bench-c/Cargo.toml \
+          cargo run --locked --quiet --release --manifest-path bench-c/Cargo.toml \
             "${feature_args[@]}" \
             --example batch_probe -- "$model" "$iters"
         done

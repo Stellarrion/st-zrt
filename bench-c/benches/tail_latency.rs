@@ -2,7 +2,6 @@
 //!
 //! Criterion is still the primary regression tool. This harness records per-iteration elapsed
 //! time and reports min/p50/p90/p99/p999/max so tail shifts are visible.
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use st_zrt::{
@@ -80,7 +79,7 @@ fn main() {
     let env = Environment::new().expect("env");
     let (sess, mem) = session(&env);
     let mut bind_once = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&INPUT],
         [&OUTPUT],
@@ -91,7 +90,7 @@ fn main() {
 
     let (sess, mem) = session(&env);
     let mut rebind = StaticIoRuntime::<f32, f32, 1, 1>::shared_session(
-        Arc::new(sess),
+        sess,
         &mem,
         [&INPUT],
         [&OUTPUT],

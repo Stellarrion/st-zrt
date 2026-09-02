@@ -1,0 +1,130 @@
+name: Publish
+
+# Publishes the workspace crates to crates.io when their versions land on main. Each
+# crate is published only if its exact version is absent from the registry, so reruns
+# and partial failures resume cleanly. Order is fixed: st-zrt-sys first, then st-zrt
+# (the wrapper depends on an exact registry version of the sys crate).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  RUST_TEST_THREADS: "1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Decide what to publish
+        id: versions
+        run: |
+          set -euo pipefail
+          sys_local="$(sed -n 's/^version = "\(.*\)"/\1/p' st-zrt-sys/Cargo.toml | head -1)"
+          wrap_local="$(sed -n 's/^version = "\(.*\)"/\1/p' st-zrt/Cargo.toml | head -1)"
+          sys_remote="$(curl -fsSL -A 'st-zrt-publish-workflow' \
+            https://crates.io/api/v1/crates/st-zrt-sys \
+            | jq -r '[.versions[].num] | join(" ")' || true)"
+          wrap_remote="$(curl -fsSL -A 'st-zrt-publish-workflow' \
+            https://crates.io/api/v1/crates/st-zrt \
+            | jq -r '[.versions[].num] | join(" ")' || true)"
+          publish_sys=no; publish_wrap=no
+          [[ " $sys_remote " != *" $sys_local "* ]] && publish_sys=yes
+          [[ " $wrap_remote " != *" $wrap_local "* ]] && publish_wrap=yes
+          echo "sys=$publish_sys" >> "$GITHUB_OUTPUT"
+          echo "wrap=$publish_wrap" >> "$GITHUB_OUTPUT"
+          echo "sys_version=$sys_local" >> "$GITHUB_OUTPUT"
+          echo "wrap_version=$wrap_local" >> "$GITHUB_OUTPUT"
+          echo "st-zrt-sys $sys_local (publish: $publish_sys); st-zrt $wrap_local (publish: $publish_wrap)"
+
+      - name: Format
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        run: cargo fmt --check
+
+      - name: Dependency policy (workspace graph)
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+      - name: Dependency policy (bench graph)
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: bench/Cargo.toml
+
+      - name: Dependency policy (bench-c graph)
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: bench-c/Cargo.toml
+
+      - name: Clippy (workspace, all features)
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        env:
+          DOCS_RS: "1"
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Tests
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        run: |
+          cargo test -p st-zrt --locked
+          cargo test -p st-zrt-sys --locked
+
+      - name: Verify generated bindings
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        run: scripts/check-generated-bindings.sh
+
+      - name: Package license inventories
+        if: steps.versions.outputs.sys == 'yes' || steps.versions.outputs.wrap == 'yes'
+        run: |
+          files="$(cargo package -p st-zrt-sys --list --allow-dirty --locked)"
+          grep -Fxq LICENSE <<<"$files"
+          files="$(cargo package -p st-zrt --list --allow-dirty --locked)"
+          grep -Fxq LICENSE <<<"$files"
+
+      - name: Publish st-zrt-sys
+        if: steps.versions.outputs.sys == 'yes'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p st-zrt-sys --locked
+
+      - name: Wait for the sys version to appear on the registry
+        if: steps.versions.outputs.sys == 'yes' && steps.versions.outputs.wrap == 'yes'
+        run: |
+          v="${{ steps.versions.outputs.sys_version }}"
+          for i in $(seq 1 24); do
+            if curl -fsSL -A 'st-zrt-publish-workflow' \
+                "https://crates.io/api/v1/crates/st-zrt-sys/$v" >/dev/null 2>&1; then
+              echo "st-zrt-sys $v is reachable on crates.io"; exit 0
+            fi
+            sleep 10
+          done
+          echo "st-zrt-sys $v did not become reachable in time" >&2
+          exit 1
+
+      - name: Publish st-zrt
+        if: steps.versions.outputs.wrap == 'yes'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p st-zrt --locked
