@@ -1,15 +1,15 @@
 # st-zrt
 
-Safe Rust runtime layer over ONNX Runtime 1.27. `st-zrt` keeps ONNX Runtime as the
+Safe Rust runtime layer over ONNX Runtime 1.29. `st-zrt` keeps ONNX Runtime as the
 execution engine and focuses on the Rust boundary: zero-copy caller buffers, prepared
 fixed-shape I/O, serving lanes, dynamic shape buckets, and optional CUDA graphs —
 without per-request setup, marshaling, or reallocation on the hot path.
 
 ## Status
 
-`st-zrt` 0.3 targets ONNX Runtime 1.27 (API 27) and additionally supports 1.28.x
-runtimes supplied via `ST_ZRT_ORT_PATH` (the ORT C API is append-only, so the API-27
-table stays valid); `Environment` creation rejects any other runtime line. Linux x86_64 is the reference
+`st-zrt` 0.4 targets ONNX Runtime 1.29 (API 29) and supports the 1.29.x line only
+(another 1.29.x runtime may be supplied via `ST_ZRT_ORT_PATH`); `Environment` creation
+rejects any other runtime line — 1.27/1.28 remain supported by the 0.3.x line. Linux x86_64 is the reference
 platform; MSRV is Rust 1.85 (edition 2024). See the repository
 [CHANGELOG](https://github.com/Stellarrion/st-zrt/blob/main/CHANGELOG.md) for release details.
 
@@ -20,7 +20,7 @@ platform; MSRV is Rust 1.85 (edition 2024). See the repository
 st-zrt = "0.3.0"
 ```
 
-The build downloads a SHA-256-pinned ONNX Runtime 1.27.0 archive, or use
+The build downloads a SHA-256-pinned ONNX Runtime 1.29.0 archive, or use
 `ST_ZRT_ORT_PATH` with a pre-extracted distribution (required on Windows). The sys
 crate's [README](https://github.com/Stellarrion/st-zrt/blob/main/st-zrt-sys/README.md)
 explains loader-path setup for downstream binaries.
@@ -90,7 +90,7 @@ configured with composable `BufferSpec` policies (`AUTO`, `LATENCY`,
 | Linux aarch64 | archive download supported; CI compile-only |
 | macOS arm64 | archive download supported; no automated coverage |
 | Windows x64 | no automatic ORT acquisition (set `ST_ZRT_ORT_PATH`); CI compile-only |
-| macOS x86_64 | not supported by the ORT 1.27.0 archive set |
+| macOS x86_64 | not supported by the ORT 1.29.0 archive set |
 
 ## Limitations
 

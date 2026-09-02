@@ -3,6 +3,69 @@
 All notable changes to st-zrt are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] — 2026-09-02
+
+The ONNX Runtime 1.29 release: `st-zrt-sys 1.29.0` bundles ORT 1.29.0 exactly (the sys
+version now mirrors the bundled runtime in all three digits), the bindings move to
+API 29, and the supported-runtime policy narrows to the 1.29 line.
+
+### Packaging
+- `st-zrt-sys 1.29.0` bundles **ONNX Runtime 1.29.0** (sha-256-pinned archives for
+  linux-x64, linux-aarch64, osx-arm64, and the linux-x64 `gpu_cuda13` GPU package).
+  The sys version exactly mirrors the bundled ORT version from this release on; the
+  only permitted deviation is a patch-digit increment for a re-revised binding over an
+  unchanged ORT when the exact number is already published.
+- `st-zrt 0.4.0` pins `st-zrt-sys = "=1.29.0"`.
+
+### C API 27 → 29 (append-only; nothing removed)
+- New bindings (422 → 425 table entries): `KernelContext_GetSyncStream` (custom-op
+  kernels can obtain the EP compute stream; gated under `custom-ops`),
+  `ModelCompilationOptions_SetWeightlessEnabled`, and
+  `SessionOptionsSetWeightlessSourceModelBuffer` (weightless EPContext sessions).
+- `API_VERSION` is now 29 and `SUPPORTED_RUNTIME_LINES` is `["1.29"]`: an API-29 table
+  cannot be served by an older runtime, and `Environment` creation rejects every other
+  line by name. Workloads that must run on ONNX Runtime 1.27/1.28 stay on `st-zrt 0.3.x`.
+
+### CUDA packaging regression (upstream, 1.29.0 gpu_cuda13 only)
+- The 1.29.0 `gpu_cuda13` package drops **sm_100a SASS and all PTX** (1.27.0 shipped
+  234 sm_100a SASS entries and 234 sm_120 PTX entries; 1.28.1 shipped both; 1.29.0
+  ships neither). B100/B200/GB200 GPUs are therefore unsupported with no forward-JIT
+  fallback. sm_75 through sm_90a SASS coverage is unchanged-to-larger — mainstream
+  GPUs (including sm_89) are unaffected.
+- Telemetry: the 1.29.0 `gpu_cuda13` package ships with POSIX telemetry compiled in;
+  the linux-x64 CPU package does not. Set `ORT_DISABLE_TELEMETRY=1` in the process
+  environment before initialization to disable it — `st-zrt` deliberately does not set
+  process environment variables itself.
+
+### Runtime behavior carried by the 1.29 bundle (relative to 1.27)
+- Kernel dispatch: cuDNN SDPA is now used for contrib `Attention` (plus a decode tier
+  for the standard `Attention` kernel) — the main performance item for fused-attention
+  paths. The legacy fmha template family was pruned in 1.28 (Ampere trait count
+  6108 → 2925) with no capability loss: `onnxruntime::flash` still covers fp16 and bf16
+  (never fp32).
+- Validation hardening: stricter rank/shape/parameter validation for pooling, LSTM,
+  `SkipLayerNorm`, `QLinearConv`, `Range`, `CropAndResize` and more — malformed models
+  now fail loudly instead of misbehaving. `SkipLayerNorm` strict mode is deprecated,
+  and CUDA BERT `EmbedLayerNorm`/`SkipLayerNorm` shapes exceeding 32-bit output
+  indexing are rejected.
+- CUDA EP dependencies: cuDNN/cuFFT are optional at runtime and `nvrtc` is no longer
+  linked (smaller required CUDA footprint); the `libcudart.so.13` hard dependency that
+  broke CPU-only imports is fixed.
+- Environment: `ORT_INTRA_OP_NUM_THREADS` / `ORT_INTER_OP_NUM_THREADS` now provide
+  default thread-pool sizes (explicit settings still win).
+- Security: TensorRT/NvTensorRTRTX engine-refit external-data path validation is now
+  unconditional (path-traversal fix).
+
+### Migration — from 0.3.x
+- Bump the `st-zrt-sys` pin to `=1.29.0` and the `st-zrt` dependency to `0.4`.
+- The supported runtime line is now **1.29.x only**. Bring-your-own 1.27/1.28 runtimes
+  (supported by 0.3 via `ST_ZRT_ORT_PATH`) are rejected by the 0.4 guard; stay on 0.3.x
+  if the workload pins an older runtime.
+- Blackwell (sm_100) users must stay on the 0.3.x line: the upstream 1.29.0 GPU
+  package contains no sm_100 SASS and no PTX.
+- No safe-API breaking changes relative to 0.3.0; the lane/bucket/CUDA-graph surfaces
+  are unchanged.
+
 ## [0.3.0] — 2026-08-23
 
 The serving/CUDA-graph release over the published 0.2.1 line: prepared serving lanes with
@@ -137,7 +200,7 @@ was consolidated into the canonical `ServingLane`/`DynamicIoRuntime` design befo
 
 ### Verified
 - Post-hardening validation on the final tree is recorded in
-  the local `docs/v0.3-release-checklist.md` (not tracked): default-features test
+  the local release checklist (not tracked): default-features test
   suite (serialized ORT environments) and the `cuda_ep` suite including the eager-capture
   regression all green; clippy `-D warnings` and `cargo fmt --all --check` clean; Compute
   Sanitizer memcheck/racecheck/initcheck/synccheck zero errors; 10,000-iteration device-output

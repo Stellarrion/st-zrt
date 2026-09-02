@@ -5,32 +5,31 @@
 [![docs.rs](https://docs.rs/st-zrt/badge.svg)](https://docs.rs/st-zrt)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
 
-`st-zrt` is a safe Rust runtime layer over ONNX Runtime 1.27: it removes the repeated
+`st-zrt` is a safe Rust runtime layer over ONNX Runtime 1.29: it removes the repeated
 Rust-side setup, marshaling, and copies that a plain wrapper pays on every prepared
 inference call. It is not a model server or scheduler, and it does not replace ONNX
 Runtime kernels, graph optimization, or execution providers.
 
 ## Status
 
-- Latest **published** wrapper: `st-zrt` **0.2.1** (crates.io).
-- This checkout is the **unpublished 0.3.0 release candidate**; the changelog and the
-  local `docs/v0.3-release-checklist.md` describe it.
-- `st-zrt-sys` candidate: **1.27.1** (binding revision over the unchanged ONNX Runtime
-  1.27.0 / API 27 ABI).
-- Supported ONNX Runtime lines for this release: **1.27** (bundled by `st-zrt-sys`) and
-  **1.28** (bring-your-own runtime via `ST_ZRT_ORT_PATH`; the append-only C API keeps the
-  API-27 table valid there). `Environment` rejects every other line at creation.
+- Latest **published** wrapper: `st-zrt` **0.3.0** (crates.io).
+- This checkout is the **unpublished 0.4.0 release candidate**; the changelog describes it.
+- `st-zrt-sys` candidate: **1.29.0**, mirroring the bundled **ONNX Runtime 1.29.0 / API 29**
+  exactly.
+- Supported ONNX Runtime line for this release: **1.29** only (bundled by `st-zrt-sys`;
+  another 1.29.x runtime may be supplied via `ST_ZRT_ORT_PATH`). `Environment` rejects every
+  other line at creation — including 1.27/1.28, which remain supported by the 0.3.x line.
 - Linux x86_64 is the reference platform (the only one with automated native link and
   test coverage). MSRV: Rust 1.85, edition 2024.
 - Support levels per platform: [`SUPPORT.md`](SUPPORT.md).
 
 ## Install and quick start
 
-After 0.3.0 is published:
+Until 0.4.0 is published, use the published 0.3.0; after it lands:
 
 ```toml
 [dependencies]
-st-zrt = "0.3.0"
+st-zrt = "0.4.0"
 ```
 
 Until then, run against this checkout:
@@ -157,6 +156,13 @@ toolkit and cuDNN 9, on Linux x86_64 only. CUDA graphs require device-resident l
 inputs refreshed on a retained user stream; capture is device-wide serialized.
 Start with `docs/cuda-graph-paths.md` (local-only) and the
 `cuda_inference` / `bert_cuda_probe` examples.
+
+GPU-architecture and privacy notes for the bundled 1.29.0 GPU package: it ships SASS for
+sm_75 through sm_90a but **no sm_100a SASS and no PTX** (upstream packaging change), so
+Blackwell GPUs (B100/B200/GB200) are unsupported with no forward-JIT fallback — use the
+0.3.x line there. The GPU package is also built with POSIX telemetry compiled in; set
+`ORT_DISABLE_TELEMETRY=1` in the process environment before initialization to disable
+it (`st-zrt` never sets process environment variables itself).
 
 ## Features, limits, support
 
