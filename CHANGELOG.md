@@ -40,7 +40,8 @@ API 29, and the supported-runtime policy narrows to the 1.29 line.
 ### Runtime behavior carried by the 1.29 bundle (relative to 1.27)
 - Kernel dispatch: cuDNN SDPA is now used for contrib `Attention` (plus a decode tier
   for the standard `Attention` kernel) — the main performance item for fused-attention
-  paths. The legacy fmha template family was pruned in 1.28 (Ampere trait count
+  paths. Attention-family kernel selection can shift on upgrade for specific shapes;
+  verify kernel dispatch if you depend on a particular tier. The legacy fmha template family was pruned in 1.28 (Ampere trait count
   6108 → 2925) with no capability loss: `onnxruntime::flash` still covers fp16 and bf16
   (never fp32).
 - Validation hardening: stricter rank/shape/parameter validation for pooling, LSTM,

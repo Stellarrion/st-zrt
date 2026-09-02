@@ -40,8 +40,6 @@ runtime of that line supplied via `ST_ZRT_ORT_PATH`):
 st-zrt = "0.4.0"
 ```
 
-(0.3.0 is on crates.io today; 0.4.0 lands with this branch. To try the checkout directly:)
-
 ```bash
 cargo run -p st-zrt --example basic_inference -- path/to/model.onnx
 ```
@@ -131,26 +129,38 @@ composable `BufferSpec` values (`AUTO`, `LATENCY`, `THROUGHPUT_LARGE`, `PINNED_H
 
 ## Benchmarks (local characterization)
 
-Medians from the in-tree A/B harnesses (`bench/` = incumbent `ort` crate, `bench-c/` =
-`st-zrt`), Criterion with 10 samples, Linux x86_64, single-threaded where noted; each
-crate uses its own pinned ONNX Runtime. Reproduce with
-`cargo bench --manifest-path bench-c/Cargo.toml --bench inference` (and the `bench/`
-counterparts). These are local characterizations, not cross-machine guarantees.
+All numbers are local characterizations on Linux x86_64, single-threaded, each crate
+using its own pinned ONNX Runtime — not cross-machine guarantees. Reproduce with the
+in-tree harnesses: `cargo run --release --manifest-path bench-c/Cargo.toml --example
+wrapper_floor` (and the `bench/` counterpart) for the floor table, and
+`cargo bench --manifest-path bench-c/Cargo.toml --bench inference` (plus the `bench/`
+counterparts) for the end-to-end medians.
 
-| Workload | `ort` naive | `ort` expert (IoBinding) | `st-zrt` prepared lane |
-|---|---:|---:|---:|
-| MNIST 1×1×28×28, 1 thread | 20.1 µs | 19.6 µs | **18.5 µs** |
-| Relay model, 4 MiB input | 164.9 µs | — | **100.3 µs** |
-| ResNet-50, batch 1 | 50.88 ms | 50.61 ms | 50.30 ms |
+**Wrapper overhead without kernels** — a single-`Identity` model (kernel ≈ no-op),
+per-run time and per-run Rust allocations:
 
-Reading the table honestly: on a tiny model the win is small once a single thread is
-pinned (thread-pool scheduling, not the wrapper, dominates tiny-model latency — prepare
-once and pin threads). The 4 MiB relay row shows the copy-elimination win st-zrt is
-built for (−39%). On a real kernel-bound model like ResNet-50 all paths converge to the
-same ORT kernels (~1% apart) — the wrapper's job is to not add overhead, and neither
-crate does at that scale. On a 16 MiB relay variant the expert `ort` IoBinding path can
-edge ahead (~15%): once kernels and memory traffic dominate, wrapper choice stops being
-the bottleneck — pick the API shape you need.
+| Identity 1×65536 | `ort` naive | `ort` expert (IoBinding) | `st-zrt` naive | `st-zrt` prepared lane |
+|---|---:|---:|---:|---:|
+| µs / run | 8.0 | 4.3 | 4.6 | **4.0** |
+| allocs / run | 7 | 3 | 1 | **0** |
+
+**End-to-end (kernels included)** — Criterion medians, 10 samples:
+
+| Workload | `ort` naive | `ort` expert | `st-zrt` naive | `st-zrt` lane |
+|---|---:|---:|---:|---:|
+| MNIST 1×1×28×28 | 20.4 µs · 7 allocs | 19.8 µs · 3 | 18.4 µs · 1 | **18.1 µs · 0** |
+| Relay, 4 MiB input | 160.4 µs · 7 | **92.5 µs · 3** | 109.3 µs · 1 | 99.5 µs · 0 |
+| ResNet-50, batch 1 | 50.88 ms | 50.61 ms | — | **50.30 ms** |
+
+Reading it honestly: the prepared lane is the only zero-allocation-per-run path, and it
+edges every alternative on tiny and kernel-free workloads. Against the *expert* `ort`
+IoBinding path the lane is roughly at parity on small models and ~8% behind on the
+4 MiB copy-heavy relay — and on a 16 MiB variant the expert path pulls further ahead
+(~15%): once kernels and memory traffic dominate, wrapper choice stops being the
+bottleneck. On ResNet-50 every path converges to the same ORT kernels (~1% apart) —
+the wrapper's job is to add nothing, and neither crate does at that scale. The big
+naive-to-lane gaps (−39% on 4 MiB, −50% on Identity) are what eliminating per-run
+copies and allocations buys, not faster kernels.
 
 ## CUDA (advanced, optional)
 
