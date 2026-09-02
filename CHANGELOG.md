@@ -32,9 +32,10 @@ API 29, and the supported-runtime policy narrows to the 1.29 line.
   ships neither). B100/B200/GB200 GPUs are therefore unsupported with no forward-JIT
   fallback. sm_75 through sm_90a SASS coverage is unchanged-to-larger.
 - Telemetry: the 1.29.0 `gpu_cuda13` package ships with POSIX telemetry compiled in;
-  the linux-x64 CPU package does not. Set `ORT_DISABLE_TELEMETRY=1` in the process
-  environment before initialization to disable it — `st-zrt` deliberately does not set
-  process environment variables itself.
+  the linux-x64 CPU package does not. `st-zrt` now disables telemetry by default: every
+  `Environment` constructor sets `ORT_DISABLE_TELEMETRY=1` before initialization
+  **unless the variable is already present**, so an explicitly exported
+  `ORT_DISABLE_TELEMETRY=0` (or any other value) always wins.
 
 ### Runtime behavior carried by the 1.29 bundle (relative to 1.27)
 - Kernel dispatch: cuDNN SDPA is now used for contrib `Attention` (plus a decode tier

@@ -23,6 +23,16 @@ Runtime kernels, graph optimization, or execution providers.
   test coverage). MSRV: Rust 1.85, edition 2024.
 - Support levels per platform: [`SUPPORT.md`](SUPPORT.md).
 
+Wrapper ↔ ONNX Runtime mapping (`st-zrt-sys` bundles the pinned ORT; "BYO" = another
+runtime of that line supplied via `ST_ZRT_ORT_PATH`):
+
+| `st-zrt` | `st-zrt-sys` (bundled ORT) | Accepted ORT runtimes |
+|---|---|---|
+| 0.1.x | 1.26.0 (1.26) | 1.26 |
+| 0.2.x | 1.27.0 (1.27) | 1.27 |
+| 0.3.x | 1.27.1 (1.27.0) | 1.27 · 1.28 (BYO) |
+| 0.4.x | 1.29.0 (1.29.0) | 1.29 |
+
 ## Install and quick start
 
 ```toml
@@ -129,9 +139,10 @@ See the `cuda_inference` / `bert_cuda_probe` examples.
 GPU-architecture and privacy notes for the bundled 1.29.0 GPU package: it ships SASS for
 sm_75 through sm_90a but **no sm_100a SASS and no PTX** (upstream packaging change), so
 Blackwell GPUs (B100/B200/GB200) are unsupported with no forward-JIT fallback — use the
-0.3.x line there. The GPU package is also built with POSIX telemetry compiled in; set
-`ORT_DISABLE_TELEMETRY=1` in the process environment before initialization to disable
-it (`st-zrt` never sets process environment variables itself).
+0.3.x line there. The GPU package is also built with POSIX telemetry compiled in;
+`st-zrt` disables it by default: every `Environment` constructor sets
+`ORT_DISABLE_TELEMETRY=1` before initialization **unless the variable is already
+present**, so exporting `ORT_DISABLE_TELEMETRY=0` explicitly keeps telemetry on.
 
 ## Features, limits, support
 

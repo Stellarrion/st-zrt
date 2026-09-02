@@ -9,7 +9,10 @@ without per-request setup, marshaling, or reallocation on the hot path.
 
 `st-zrt` 0.4 targets ONNX Runtime 1.29 (API 29) and supports the 1.29.x line only
 (another 1.29.x runtime may be supplied via `ST_ZRT_ORT_PATH`); `Environment` creation
-rejects any other runtime line — 1.27/1.28 remain supported by the 0.3.x line. Linux x86_64 is the reference
+rejects any other runtime line. Wrapper ↔ ORT mapping: 0.1.x → 1.26, 0.2.x → 1.27,
+0.3.x → 1.27 bundled + 1.28 BYO, 0.4.x → 1.29. Telemetry in GPU builds is disabled by
+default (`ORT_DISABLE_TELEMETRY=1` is set before initialization unless the variable is
+already present; export `0` to keep it on). Linux x86_64 is the reference
 platform; MSRV is Rust 1.85 (edition 2024). See the repository
 [CHANGELOG](https://github.com/Stellarrion/st-zrt/blob/main/CHANGELOG.md) for release details.
 

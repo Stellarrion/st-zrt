@@ -33,6 +33,33 @@ fn every_environment_constructor_passes_the_guard() {
 }
 
 #[test]
+fn telemetry_opt_out_defaults_to_disabled_but_respects_explicit_values() {
+    use std::ffi::OsString;
+    // Presence-based default: an unset variable becomes "1"; an explicit value —
+    // including the opt-in "0" — is left untouched.
+    let saved = std::env::var_os("ORT_DISABLE_TELEMETRY");
+    // SAFETY: test-only environment mutation, serialized with the other ORT tests.
+    unsafe { std::env::remove_var("ORT_DISABLE_TELEMETRY") };
+    st_zrt::Environment::new().expect("env with default telemetry opt-out");
+    assert_eq!(
+        std::env::var_os("ORT_DISABLE_TELEMETRY"),
+        Some(OsString::from("1"))
+    );
+
+    unsafe { std::env::set_var("ORT_DISABLE_TELEMETRY", "0") };
+    st_zrt::Environment::new().expect("env with explicit telemetry opt-in");
+    assert_eq!(
+        std::env::var_os("ORT_DISABLE_TELEMETRY"),
+        Some(OsString::from("0"))
+    );
+
+    match saved {
+        Some(v) => unsafe { std::env::set_var("ORT_DISABLE_TELEMETRY", v) },
+        None => unsafe { std::env::remove_var("ORT_DISABLE_TELEMETRY") },
+    }
+}
+
+#[test]
 fn guard_error_names_the_offending_runtime() {
     // Negative proof through the predicate the guard uses: every unsupported version
     // string must be rejected, so the guard can only let supported lines through.
