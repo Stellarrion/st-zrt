@@ -69,7 +69,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Mirrors libonnxruntime exactly. Bumping this = a new release of st-zrt-sys.
-const ORT_VERSION: &str = "1.29.0";
+const ORT_VERSION: &str = "1.27.0";
 
 /// Bounded TCP/TLS connect time per download attempt.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -100,7 +100,7 @@ fn asset_for(target: &str, gpu: bool) -> (&'static str, &'static str, &'static s
             return (
                 "linux-x64-gpu_cuda13",
                 "tgz",
-                "844c64acfc43ab9423215c26493055ea229268e28283146cc644ecef0bdae048",
+                "1a3227e1dc2f53d9f877c93278af500b15e26d99aa5ade877692138b3ab7d351",
             );
         }
         panic!(
@@ -113,19 +113,19 @@ fn asset_for(target: &str, gpu: bool) -> (&'static str, &'static str, &'static s
         (
             "linux-x64",
             "tgz",
-            "c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba",
+            "547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f",
         )
     } else if linux && aarch64 {
         (
             "linux-aarch64",
             "tgz",
-            "e1799098ebc054b370f6176a450f158720f297818c613e5dc99b92e2ec82346f",
+            "3e4d83ac06924a32a07b6d7f91ce6f852876153fc0bbdf931bf517a140bfbe48",
         )
     } else if darwin && aarch64 {
         (
             "osx-arm64",
             "tgz",
-            "d0706fc34f315d8c88639d0a8c81f2e09e815f282cabed3493c06a054352cf92",
+            "545e81c58152353acb0d1e8bd6ce4b62f830c0961f5b3acfedc790ffd76e477a",
         )
     } else if windows && x86_64 {
         panic!(

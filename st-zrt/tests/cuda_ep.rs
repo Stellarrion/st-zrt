@@ -1317,7 +1317,7 @@ fn cuda_graph_device_input_replay_reads_fresh() {
 /// Caveat: ORT's CUDA-graph docs state multi-threaded `Run()` on the *same* `InferenceSession` is
 /// unsupported with cuda-graphs. This test shares one session across the N concurrent replays and
 /// passes on this ORT/CUDA build, but that is an undocumented dependency — the supported production
-/// shape is a replicated session per lane.
+/// shape is a replicated session per lane (see `docs/cuda-graph-paths.md`).
 #[test]
 #[cfg(feature = "cuda")]
 fn cuda_graph_device_input_concurrent_replay_is_race_free() {

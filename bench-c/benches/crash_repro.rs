@@ -1,4 +1,4 @@
-//! Zero-copy + arena STABILITY guard. Asserts that
+//! Zero-copy + arena STABILITY guard (RESULTS.md §8, root cause re-investigated). Asserts that
 //! the large-tensor zero-copy path (arena ON, `CreateTensorWithDataAsOrtValue` input) stays
 //! crash-free under criterion's measurement loop. The historical ">4MB segfault" was NOT this
 //! combination — it was a use-after-free of the OrtEnv in the bench harness (the Env was freed

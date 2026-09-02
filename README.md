@@ -5,40 +5,35 @@
 [![docs.rs](https://docs.rs/st-zrt/badge.svg)](https://docs.rs/st-zrt)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
 
-`st-zrt` is a safe Rust runtime layer over ONNX Runtime 1.29 that turns prepared
-inference into a zero-ceremony hot path: bind tensors once, then run — no per-call
-setup, marshaling, allocation, or copying. It keeps ONNX Runtime's kernels, graph
-optimization, and execution providers, and leaves scheduling to you.
+`st-zrt` is a safe Rust runtime layer over ONNX Runtime 1.27: it removes the repeated
+Rust-side setup, marshaling, and copies that a plain wrapper pays on every prepared
+inference call. It is not a model server or scheduler, and it does not replace ONNX
+Runtime kernels, graph optimization, or execution providers.
 
 ## Status
 
-- Current release: `st-zrt` **0.4.0** with `st-zrt-sys` **1.29.0**, mirroring the
-  bundled **ONNX Runtime 1.29.0 / API 29** exactly; publication is automated from the
-  default branch. The changelog describes this and previous releases.
-- Previous published line: `st-zrt` **0.3.0** / `st-zrt-sys` **1.27.1** (crates.io).
-- Supported ONNX Runtime line for this release: **1.29** only (bundled by `st-zrt-sys`;
-  another 1.29.x runtime may be supplied via `ST_ZRT_ORT_PATH`). `Environment` rejects every
-  other line at creation — including 1.27/1.28, which remain supported by the 0.3.x line.
+- Latest **published** wrapper: `st-zrt` **0.2.1** (crates.io).
+- This checkout is the **unpublished 0.3.0 release candidate**; the changelog and the
+  local `docs/v0.3-release-checklist.md` describe it.
+- `st-zrt-sys` candidate: **1.27.1** (binding revision over the unchanged ONNX Runtime
+  1.27.0 / API 27 ABI).
+- Supported ONNX Runtime lines for this release: **1.27** (bundled by `st-zrt-sys`) and
+  **1.28** (bring-your-own runtime via `ST_ZRT_ORT_PATH`; the append-only C API keeps the
+  API-27 table valid there). `Environment` rejects every other line at creation.
 - Linux x86_64 is the reference platform (the only one with automated native link and
   test coverage). MSRV: Rust 1.85, edition 2024.
 - Support levels per platform: [`SUPPORT.md`](SUPPORT.md).
 
-Wrapper ↔ ONNX Runtime mapping (`st-zrt-sys` bundles the pinned ORT; "BYO" = another
-runtime of that line supplied via `ST_ZRT_ORT_PATH`):
-
-| `st-zrt` | `st-zrt-sys` (bundled ORT) | Accepted ORT runtimes |
-|---|---|---|
-| 0.1.x | 1.26.0 (1.26) | 1.26 |
-| 0.2.x | 1.27.0 (1.27) | 1.27 |
-| 0.3.x | 1.27.1 (1.27.0) | 1.27 · 1.28 (BYO) |
-| 0.4.x | 1.29.0 (1.29.0) | 1.29 |
-
 ## Install and quick start
+
+After 0.3.0 is published:
 
 ```toml
 [dependencies]
-st-zrt = "0.4.0"
+st-zrt = "0.3.0"
 ```
+
+Until then, run against this checkout:
 
 ```bash
 cargo run -p st-zrt --example basic_inference -- path/to/model.onnx
@@ -127,54 +122,41 @@ binding freshness with `ServingLane::set_rebind_inputs_each_run(true)` or
 composable `BufferSpec` values (`AUTO`, `LATENCY`, `THROUGHPUT_LARGE`, `PINNED_HOST`,
 `CUDA_PINNED`, or `BufferSpec::aligned(4096).prefault()`).
 
-## Benchmarks (local characterization)
+Deep dives: `docs/architecture.md` and `docs/cuda-graph-paths.md` (local-only).
 
-All numbers are local characterizations on Linux x86_64, single-threaded, each crate
-using its own pinned ONNX Runtime — not cross-machine guarantees. Reproduce with the
-in-tree harnesses: `cargo run --release --manifest-path bench-c/Cargo.toml --example
-wrapper_floor` (and the `bench/` counterpart) for the floor table, and
-`cargo bench --manifest-path bench-c/Cargo.toml --bench inference` (plus the `bench/`
-counterparts) for the end-to-end medians.
+## Performance (scoped)
 
-**Wrapper overhead without kernels** — a single-`Identity` model (kernel ≈ no-op),
-per-run time and per-run Rust allocations:
+All numbers below are local measurements from `docs/v0.3-benchmark-results.md`
+(local-only; 2026-08-13; AMD
+Ryzen 9 7900, RTX 4090; characterization, not cross-machine guarantees). They compare
+the Rust wrapper/session/I/O path around ONNX Runtime; ORT still executes the graph.
 
-| Identity 1×65536 | `ort` naive | `ort` expert (IoBinding) | `st-zrt` naive | `st-zrt` prepared lane |
-|---|---:|---:|---:|---:|
-| µs / run | 8.0 | 4.3 | 4.6 | **4.0** |
-| allocs / run | 7 | 3 | 1 | **0** |
+- CPU: on the small relay fixture a prepared lane (~19.0 µs), prepared IoBinding
+  (~18.8 µs), and a direct one-thread run (~19.6 µs) are within about 1 µs of each
+  other — wrapper cost is already near the noise floor once prepared. The linked report
+  retains the ResNet-50 A/B and counting-allocator evidence (0 Rust allocations/run for
+  the prepared lane); the measured benefit is hot-path preparation, not faster kernels.
+- CUDA graph replay (thenlper/gte-small, batch 1, seq 128, shared GPU):
 
-**End-to-end (kernels included)** — Criterion medians, 10 samples:
+| Path | Median | vs baseline | Correctness |
+|---|---:|---:|---|
+| baseline (rebind, no graph) | 750.5 µs | 1.00× | reference |
+| host-input graph | 586.2 µs | 1.28× | **stale** (max abs diff 2.9210) |
+| device-input graph | 639.5 µs | 1.17× | correct (max abs diff 0.0035) |
 
-| Workload | `ort` naive | `ort` expert | `st-zrt` naive | `st-zrt` lane |
-|---|---:|---:|---:|---:|
-| MNIST 1×1×28×28 | 20.4 µs · 7 allocs | 19.8 µs · 3 | 18.4 µs · 1 | **18.1 µs · 0** |
-| Relay, 4 MiB input | 160.4 µs · 7 | **92.5 µs · 3** | 109.3 µs · 1 | 99.5 µs · 0 |
-| ResNet-50, batch 1 | 50.88 ms | 50.61 ms | — | **50.30 ms** |
-
-How to read these numbers: the prepared lane is the only path with zero allocations
-per run, and it wins the kernel-free floor outright. Versus the expert `ort` IoBinding
-path it is at parity on small models and ~8% behind on the 4 MiB copy-heavy relay; on a
-16 MiB variant the expert path pulls ~15% ahead — once kernels and memory traffic
-dominate, the wrapper is no longer the bottleneck. On ResNet-50 all paths converge to
-the same ONNX Runtime kernels within ~1%. The large naive-to-lane gaps (−39% on 4 MiB,
-−50% on Identity) measure what eliminating per-run copies and allocations buys — not
-faster kernels.
+- The correct device-input graph gains about 1.2× (1.19× in a lower-contention rerun);
+  the aspirational 1.5× target was **not met** on this fixture. The faster host-input
+  number is invalid: replays read stale device memory, which is why that configuration
+  is rejected at construction.
+- Reproduce with `scripts/benchmark-zrt.sh` and the `bench`/`bench-c` harnesses.
 
 ## CUDA (advanced, optional)
 
 The `cuda` feature links the GPU ONNX Runtime package (CUDA 13) plus a system CUDA 13
 toolkit and cuDNN 9, on Linux x86_64 only. CUDA graphs require device-resident lane
 inputs refreshed on a retained user stream; capture is device-wide serialized.
-See the `cuda_inference` / `bert_cuda_probe` examples.
-
-GPU-architecture and privacy notes for the bundled 1.29.0 GPU package: it ships SASS for
-sm_75 through sm_90a but **no sm_100a SASS and no PTX** (upstream packaging change), so
-Blackwell GPUs (B100/B200/GB200) are unsupported with no forward-JIT fallback — use the
-0.3.x line there. The GPU package is also built with POSIX telemetry compiled in;
-`st-zrt` disables it by default: every `Environment` constructor sets
-`ORT_DISABLE_TELEMETRY=1` before initialization **unless the variable is already
-present**, so exporting `ORT_DISABLE_TELEMETRY=0` explicitly keeps telemetry on.
+Start with `docs/cuda-graph-paths.md` (local-only) and the
+`cuda_inference` / `bert_cuda_probe` examples.
 
 ## Features, limits, support
 
@@ -186,7 +168,9 @@ present**, so exporting `ORT_DISABLE_TELEMETRY=0` explicitly keeps telemetry on.
 | `custom-ops` | safe Rust custom-operator authoring |
 | `model-editor` | graph editing, AOT compile, interop, custom-EP authoring |
 
-Known platform and acquisition limits are listed in [`SUPPORT.md`](SUPPORT.md).
+Known platform and acquisition limits are listed in [`SUPPORT.md`](SUPPORT.md);
+CUDA-graph lease semantics and path-selection limits are documented in
+`docs/cuda-graph-paths.md` (local-only).
 
 ## Project
 
@@ -197,8 +181,9 @@ Known platform and acquisition limits are listed in [`SUPPORT.md`](SUPPORT.md).
   expert baseline (kept out of the workspace because `ort-sys` and `st-zrt-sys` both link
   `onnxruntime`).
 
-Docs: [CHANGELOG](CHANGELOG.md) · [SUPPORT](SUPPORT.md) ·
-[CONTRIBUTING](CONTRIBUTING.md).
+Tracked docs: [CHANGELOG](CHANGELOG.md) · [SUPPORT](SUPPORT.md) ·
+[CONTRIBUTING](CONTRIBUTING.md). Deep-dive documents live in `docs/` locally and are
+not published.
 
 Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security: [`SECURITY.md`](SECURITY.md).
 

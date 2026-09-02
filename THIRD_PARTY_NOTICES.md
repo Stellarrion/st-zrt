@@ -11,7 +11,7 @@ you actually ship.
 ## ONNX Runtime
 
 - `st-zrt-sys` does not bundle ONNX Runtime. At build time it downloads a SHA-256-pinned
-  ONNX Runtime 1.29.0 archive from Microsoft's GitHub releases (Linux x86_64, Linux
+  ONNX Runtime 1.27.0 archive from Microsoft's GitHub releases (Linux x86_64, Linux
   aarch64, macOS arm64; a GPU package when the `cuda` feature is enabled), or uses a
   user-provided distribution via `ST_ZRT_ORT_PATH` (required on Windows).
 - ONNX Runtime is made available by Microsoft and its contributors under the MIT
