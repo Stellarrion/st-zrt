@@ -2781,7 +2781,7 @@ impl Session {
             Vec::new(),
             None,
             cuda_stream_guards(&opts),
-            spool,
+            None,
         )
     }
 
@@ -2839,7 +2839,7 @@ impl Session {
             Vec::new(),
             None,
             cuda_stream_guards(&opts),
-            spool,
+            None,
         )
     }
 
