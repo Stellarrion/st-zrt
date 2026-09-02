@@ -152,15 +152,14 @@ per-run time and per-run Rust allocations:
 | Relay, 4 MiB input | 160.4 µs · 7 | **92.5 µs · 3** | 109.3 µs · 1 | 99.5 µs · 0 |
 | ResNet-50, batch 1 | 50.88 ms | 50.61 ms | — | **50.30 ms** |
 
-Reading it honestly: the prepared lane is the only zero-allocation-per-run path, and it
-edges every alternative on tiny and kernel-free workloads. Against the *expert* `ort`
-IoBinding path the lane is roughly at parity on small models and ~8% behind on the
-4 MiB copy-heavy relay — and on a 16 MiB variant the expert path pulls further ahead
-(~15%): once kernels and memory traffic dominate, wrapper choice stops being the
-bottleneck. On ResNet-50 every path converges to the same ORT kernels (~1% apart) —
-the wrapper's job is to add nothing, and neither crate does at that scale. The big
-naive-to-lane gaps (−39% on 4 MiB, −50% on Identity) are what eliminating per-run
-copies and allocations buys, not faster kernels.
+How to read these numbers: the prepared lane is the only path with zero allocations
+per run, and it wins the kernel-free floor outright. Versus the expert `ort` IoBinding
+path it is at parity on small models and ~8% behind on the 4 MiB copy-heavy relay; on a
+16 MiB variant the expert path pulls ~15% ahead — once kernels and memory traffic
+dominate, the wrapper is no longer the bottleneck. On ResNet-50 all paths converge to
+the same ONNX Runtime kernels within ~1%. The large naive-to-lane gaps (−39% on 4 MiB,
+−50% on Identity) measure what eliminating per-run copies and allocations buys — not
+faster kernels.
 
 ## CUDA (advanced, optional)
 
