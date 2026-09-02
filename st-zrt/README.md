@@ -66,6 +66,22 @@ fn main() -> st_zrt::Result<()> {
 A *lane* binds caller-owned input/output buffers once; serving then mutates the same
 buffers and runs — after warmup, a prepared lane performs no per-run Rust allocation
 for bindings or marshaling.
+
+### Wrapper overhead without kernels (local characterization)
+
+A single-`Identity` model (kernel ≈ no-op), one thread, per-run time and per-run Rust
+allocations, versus the incumbent `ort` crate:
+
+| Identity 1×65536 | `ort` naive | `ort` expert (IoBinding) | `st-zrt` naive | `st-zrt` prepared lane |
+|---|---:|---:|---:|---:|
+| µs / run | 8.0 | 4.3 | 4.6 | **4.0** |
+| allocs / run | 7 | 3 | 1 | **0** |
+
+End-to-end with kernels (medians): on MNIST the lane runs 18.1 µs at zero allocations
+per run (`ort` naive 20.4 µs · 7); on a 4 MiB copy-heavy relay the naive-to-lane gap is
+−39%, though the expert `ort` IoBinding path stays competitive on large tensors; on
+ResNet-50 every path converges to the same ONNX Runtime kernels (~1% apart). These are
+local characterizations, not cross-machine guarantees.
 CUDA/TensorRT callers that mutate reusable CPU input buffers can
 opt into per-run rebinding with `ServingLane::set_rebind_inputs_each_run(true)` or
 `DynamicIoOptions::with_rebind_inputs_each_run(true)`. Reusable-buffer placement is
