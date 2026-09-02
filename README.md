@@ -122,13 +122,12 @@ binding freshness with `ServingLane::set_rebind_inputs_each_run(true)` or
 composable `BufferSpec` values (`AUTO`, `LATENCY`, `THROUGHPUT_LARGE`, `PINNED_HOST`,
 `CUDA_PINNED`, or `BufferSpec::aligned(4096).prefault()`).
 
-Deep dives: [`docs/architecture.md`](docs/architecture.md),
-[`docs/cuda-graph-paths.md`](docs/cuda-graph-paths.md).
+Deep dives: `docs/architecture.md` and `docs/cuda-graph-paths.md` (local-only).
 
 ## Performance (scoped)
 
-All numbers below are local measurements from
-[`docs/v0.3-benchmark-results.md`](docs/v0.3-benchmark-results.md) (2026-08-13; AMD
+All numbers below are local measurements from `docs/v0.3-benchmark-results.md`
+(local-only; 2026-08-13; AMD
 Ryzen 9 7900, RTX 4090; characterization, not cross-machine guarantees). They compare
 the Rust wrapper/session/I/O path around ONNX Runtime; ORT still executes the graph.
 
@@ -156,7 +155,7 @@ the Rust wrapper/session/I/O path around ONNX Runtime; ORT still executes the gr
 The `cuda` feature links the GPU ONNX Runtime package (CUDA 13) plus a system CUDA 13
 toolkit and cuDNN 9, on Linux x86_64 only. CUDA graphs require device-resident lane
 inputs refreshed on a retained user stream; capture is device-wide serialized.
-Start with [`docs/cuda-graph-paths.md`](docs/cuda-graph-paths.md) and the
+Start with `docs/cuda-graph-paths.md` (local-only) and the
 `cuda_inference` / `bert_cuda_probe` examples.
 
 ## Features, limits, support
@@ -171,7 +170,7 @@ Start with [`docs/cuda-graph-paths.md`](docs/cuda-graph-paths.md) and the
 
 Known platform and acquisition limits are listed in [`SUPPORT.md`](SUPPORT.md);
 CUDA-graph lease semantics and path-selection limits are documented in
-[`docs/cuda-graph-paths.md`](docs/cuda-graph-paths.md).
+`docs/cuda-graph-paths.md` (local-only).
 
 ## Project
 
@@ -182,11 +181,9 @@ CUDA-graph lease semantics and path-selection limits are documented in
   expert baseline (kept out of the workspace because `ort-sys` and `st-zrt-sys` both link
   `onnxruntime`).
 
-Docs: [`architecture`](docs/architecture.md) ·
-[CUDA graphs](docs/cuda-graph-paths.md) ·
-[benchmarks](docs/v0.3-benchmark-results.md) ·
-[release checklist](docs/v0.3-release-checklist.md) ·
-[CHANGELOG](CHANGELOG.md).
+Tracked docs: [CHANGELOG](CHANGELOG.md) · [SUPPORT](SUPPORT.md) ·
+[CONTRIBUTING](CONTRIBUTING.md). Deep-dive documents live in `docs/` locally and are
+not published.
 
 Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security: [`SECURITY.md`](SECURITY.md).
 
