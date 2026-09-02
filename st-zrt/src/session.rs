@@ -174,6 +174,10 @@ pub(crate) struct SessionInner {
     /// Owned CUDA streams referenced by this session's provider configuration. Native session
     /// release occurs before these guards drop.
     _cuda_streams: CudaStreamGuards,
+    /// Spooled model file backing an external-data buffer load (see
+    /// [`Session::from_bytes_with_external_data`]). Dropped only after the native session is
+    /// released, since ORT may map or reopen external initializer data lazily.
+    _spooled_model: Option<crate::model_spool::SpooledModelFile>,
     /// Keeps the Env alive for this Session's whole lifetime. The explicit `SessionInner::drop`
     /// releases the native session before Rust drops this guard.
     _env: Arc<EnvInner>,
@@ -367,6 +371,35 @@ impl Session {
     /// Load `model_path` (filesystem path, UTF-8) and pre-marshal its I/O names and
     /// output type/shape (cached so the hot path needs no introspection).
     pub fn new(env: &Environment, model_path: &str, opts: SessionOptions) -> Result<Self> {
+        Self::new_with_spool(env, model_path, opts, None)
+    }
+
+    /// Load a model from an in-memory byte buffer whose initializers use ONNX
+    /// **external data** (any model over the 2 GiB protobuf limit, and any model saved
+    /// with `save_as_external_data`).
+    ///
+    /// ORT resolves external-data paths relative to the model *file's* directory, which a
+    /// plain buffer load cannot supply (the reference stays unresolved and loading
+    /// fails). This constructor resolves it generically: `model_data` is spooled to a
+    /// unique temporary file inside `external_data_dir` — the directory that actually
+    /// holds the external-data files — and loaded through the path-based entry point.
+    /// The temporary file is removed when the session is dropped; the directory must be
+    /// writable. [`Self::from_bytes`] remains the right choice for self-contained models.
+    pub fn from_bytes_with_external_data(
+        env: &Environment, model_data: &[u8], external_data_dir: impl AsRef<std::path::Path>,
+        opts: SessionOptions,
+    ) -> Result<Self> {
+        let spool = crate::model_spool::spool_model_bytes(external_data_dir.as_ref(), model_data)?;
+        let spool_path = spool.path().to_string_lossy().into_owned();
+        Self::new_with_spool(env, &spool_path, opts, Some(spool))
+    }
+
+    /// Path-based creation that may carry the spooled model file keeping external data
+    /// resolvable; `Session::new` is this with `None`.
+    fn new_with_spool(
+        env: &Environment, model_path: &str, opts: SessionOptions,
+        spool: Option<crate::model_spool::SpooledModelFile>,
+    ) -> Result<Self> {
         let cpath = CString::new(model_path)
             .map_err(|_| crate::Error::new(-1, "model path contains a NUL"))?;
         let opts_handle = build_session_options_for_env(env, &opts)?;
@@ -381,7 +414,14 @@ impl Session {
         });
         unsafe { api().release_session_options()(opts_handle) };
         create?;
-        Self::from_handle(sess, env.share(), cuda_stream_guards(&opts))
+        Self::from_handle_with_resources(
+            sess,
+            env.share(),
+            Vec::new(),
+            None,
+            cuda_stream_guards(&opts),
+            spool,
+        )
     }
 
     /// Load a model from an in-memory byte buffer (`CreateSessionFromArray`, idx 8) — no
@@ -452,6 +492,7 @@ impl Session {
             initializers,
             None,
             cuda_stream_guards(&opts),
+            None,
         )
     }
 
@@ -489,6 +530,7 @@ impl Session {
             initializers,
             None,
             cuda_stream_guards(&opts),
+            None,
         )
     }
 
@@ -560,6 +602,7 @@ impl Session {
             initializers,
             Some(prepacked.share()),
             cuda_stream_guards(&opts),
+            None,
         )
     }
 
@@ -605,6 +648,7 @@ impl Session {
             initializers,
             None,
             cuda_stream_guards(&opts),
+            None,
         )
     }
 
@@ -638,6 +682,7 @@ impl Session {
             initializers,
             Some(prepacked.share()),
             cuda_stream_guards(&opts),
+            None,
         )
     }
 
@@ -647,13 +692,14 @@ impl Session {
     fn from_handle(
         sess: *mut sys::SessionHandle, env: Arc<EnvInner>, cuda_streams: CudaStreamGuards,
     ) -> Result<Self> {
-        Self::from_handle_with_resources(sess, env, Vec::new(), None, cuda_streams)
+        Self::from_handle_with_resources(sess, env, Vec::new(), None, cuda_streams, None)
     }
 
     fn from_handle_with_resources(
         sess: *mut sys::SessionHandle, env: Arc<EnvInner>,
         owned_initializers: Vec<OwnedInitializer>,
         prepacked_weights: Option<Arc<PrepackedWeightsInner>>, cuda_streams: CudaStreamGuards,
+        spooled_model: Option<crate::model_spool::SpooledModelFile>,
     ) -> Result<Self> {
         let sess = crate::ensure_non_null(sess, "session")?;
         // Resolve every fallible setup value while all lifetime guards remain in this outer frame.
@@ -685,6 +731,7 @@ impl Session {
             };
         Ok(Self {
             inner: Arc::new(SessionInner {
+                _spooled_model: spooled_model,
                 sess,
                 input_names,
                 input_ptrs,

@@ -19,7 +19,7 @@ publish = false
 # Pinned to the in-tree wrapper version on purpose: the wildcard-dependency ban forbids
 # a bare path dep, and a wrapper minor bump must update this pin in the same change
 # (resolution fails loudly otherwise).
-st-zrt = { path = "../st-zrt", version = "=0.4.0" }
+st-zrt = { path = "../st-zrt", version = "=0.4.1" }
 
 [features]
 default = []

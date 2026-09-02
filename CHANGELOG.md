@@ -1,3 +1,18 @@
+## [0.4.1] — 2026-09-03
+
+### Added — external-data resolution for byte-loaded models
+- `Session::from_bytes_with_external_data(model_data, external_data_dir, ..)` and
+  `ModelCompilationOptions::set_input_model_from_buffer_with_external_data(..)`: models
+  whose initializers use ONNX external data (every model over the 2 GiB protobuf limit,
+  and any model saved with external data) can now be loaded from memory. ORT resolves
+  external-data paths relative to the model file's directory, which a buffer load
+  cannot supply; the new entry points spool the serialized model to a unique temporary
+  file inside the caller-supplied external-data directory and load through the
+  path-based API. The temporary file is owned by the session (or by a guard returned to
+  the compile caller) and removed on drop; the directory must be writable.
+- `Session::from_bytes` remains the right choice for self-contained models and is
+  unchanged.
+
 # Changelog
 
 All notable changes to st-zrt are documented here. The format is based on
