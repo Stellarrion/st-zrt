@@ -594,6 +594,17 @@ impl ModelCompilationOptions {
         check(unsafe { set_input(self.ptr, model.as_ptr()) })
     }
 
+    /// External-data-aware variant: spools `bytes` into `external_data_dir` and sets the
+    /// input model by path; keep the returned guard alive until compile finishes.
+    pub fn set_input_model_from_buffer_with_external_data(
+        &self, bytes: &[u8], external_data_dir: impl AsRef<std::path::Path>,
+    ) -> Result<crate::model_spool::SpooledModelFile> {
+        let spool = crate::model_spool::spool_model_bytes(external_data_dir.as_ref(), bytes)?;
+        let path = spool.path().to_string_lossy().into_owned();
+        self.set_input_model_path(&path)?;
+        Ok(spool)
+    }
+
     /// Input: the bytes of a serialized ONNX model (BORROWED for the duration of compile).
     pub fn set_input_model_from_buffer(&self, bytes: &[u8]) -> Result<()> {
         let set_input = require_sub_api_fn(
