@@ -1,9 +1,8 @@
 //! st-zrt — Stellarion's zero-overhead Rust runtime over onnxruntime.
 //!
-//! Scope (locked, see `docs/architecture.md`): the *runtime library* only. Kernels are reused,
-//! not written; a serving layer is a separate, later project. The win lives in the
-//! binding/session/memory/IO/scheduling layer — zero binding tax, zero-copy tensor
-//! I/O, pre-marshaled names, reused run options.
+//! Scope (locked): the *runtime library* only. Kernels are reused, not written; a serving
+//! layer is out of scope. The win lives in the binding/session/memory/IO/scheduling layer —
+//! zero binding tax, zero-copy tensor I/O, pre-marshaled names, reused run options.
 //!
 //! This safe layer sits over [`st_zrt_sys`] — the exhaustive, **generated** FFI table
 //! (see `st-zrt-sys/src/generated.rs`, produced by `st-zrt-sys-codegen`).

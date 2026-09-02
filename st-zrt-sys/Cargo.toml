@@ -1,8 +1,10 @@
 [package]
 name = "st-zrt-sys"
-# Major/minor mirror libonnxruntime; patch releases revision the Rust binding surface for the
-# same upstream ABI when an already-published binding must be extended.
-version = "1.27.1"
+# Follows the exact bundled libonnxruntime version (build.rs ORT_VERSION) in all three digits.
+# The only permitted deviation: patch+1 for a re-revised binding over an unchanged ORT when the
+# exact number is already published (crates.io versions are immutable); the bundled ORT_VERSION
+# is then recorded in the CHANGELOG entry.
+version = "1.29.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,7 +13,7 @@ repository.workspace = true
 publish = true
 links = "onnxruntime"
 build = "build.rs"
-description = "Raw ONNX Runtime 1.27 bindings (1.28.x runtime compatible) with verified native library acquisition for st-zrt."
+description = "Raw ONNX Runtime 1.29 bindings with verified native library acquisition for st-zrt."
 documentation = "https://docs.rs/st-zrt-sys"
 readme = "README.md"
 keywords = ["onnx", "onnxruntime", "ffi", "bindings"]

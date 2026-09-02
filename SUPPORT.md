@@ -21,10 +21,12 @@
 | Linux aarch64 | ORT archive download supported; CI checks are compile-only |
 | Windows x64 | compile-only in CI; no automatic ORT acquisition — set `ST_ZRT_ORT_PATH` from the release ZIP or the NuGet package |
 | macOS arm64 | ORT archive download supported; no automated coverage |
-| macOS x86_64 | not supported by the ONNX Runtime 1.27.0 archive set |
+| macOS x86_64 | not supported by the ONNX Runtime 1.29.0 archive set |
 
-MSRV: Rust 1.85 (edition 2024). Release-candidate line: `st-zrt` 0.3 /
-`st-zrt-sys` 1.27.1; it becomes the supported line when published.
+MSRV: Rust 1.85 (edition 2024). Current line: `st-zrt` 0.4.0 / `st-zrt-sys` 1.29.0
+(ORT 1.29 only; publication is automated from the default branch). Previous line:
+`st-zrt` 0.3.0 / `st-zrt-sys` 1.27.1 (ORT 1.27 bundled, 1.28 bring-your-own). See the
+wrapper-to-ORT mapping table in the README.
 
 On compile-only platforms, issues are limited to what can be reproduced without native
 linking; runtime behavior there is best-effort and unverified by this project's CI.
